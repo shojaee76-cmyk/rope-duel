@@ -1,2 +1,6 @@
-# Local Netlify folder
-.netlify
+node_modules/
+vendor/
+smoke_*.mjs
+smoke_v2.png
+_crop_*.png
+live_shot.png
