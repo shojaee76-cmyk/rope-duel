@@ -1,0 +1,19 @@
+{
+  "name": "the-rope-duel-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "THE ROPE DUEL - live BTC/USDT order-flow duel: integrated site (task t_e2039773)",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild main.js --bundle --format=iife --outfile=bundle.js --minify --target=es2019",
+    "serve": "node serve.mjs",
+    "verify": "node verify_integration.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.63.0"
+  },
+  "dependencies": {
+    "three": "^0.186.0"
+  }
+}
