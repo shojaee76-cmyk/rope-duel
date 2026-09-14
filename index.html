@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>The Rope Duel | Live BTC/USDT</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23F7931A'/%3E%3Ctext x='16' y='23' font-size='18' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%237A4A08'%3EB%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --gold: #F5C542; --gold-dim: #D4A017;
+    --jade: #7FD48A; --jade-dim: #0F5D4E;
+    --up: #26A69A; --down: #EF5350;
+    --ink: #EDE7D8; --ink-dim: #8f8fa8;
+    --panel: rgba(8, 9, 22, 0.72);
+    --edge: rgba(245, 197, 66, 0.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05060F; overflow: hidden;
+    font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #duel-scene { position: fixed; inset: 0; }
+  #duel-scene canvas { display: block; }
+
+  /* ---------- top HUD ---------- */
+  #hud { position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; align-items: stretch; gap: 0;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 12px;
+    padding: 8px 14px; backdrop-filter: blur(6px); box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    max-width: min(96vw, 720px); }
+  .hud-cell { display: flex; flex-direction: column; justify-content: center;
+    padding: 2px 14px; border-right: 1px solid rgba(255,255,255,0.08); min-width: 0; }
+  .hud-cell:last-child { border-right: 0; }
+  .hud-label { font-size: 9px; letter-spacing: 0.14em; color: var(--ink-dim);
+    text-transform: uppercase; white-space: nowrap; }
+  .hud-value { font: 600 20px/1.15 "Consolas", "Courier New", monospace;
+    color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #chg24h { font-size: 13px; font-weight: 600; white-space: nowrap;
+    font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); } .down { color: var(--down); }
+
+  /* ---------- pressure meter (sword vs sword) ---------- */
+  #meter { position: fixed; top: 86px; left: 50%; transform: translateX(-50%);
+    z-index: 10; width: min(46vw, 340px); height: 26px;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 13px;
+    overflow: hidden; backdrop-filter: blur(6px); }
+  #meter-buy { position: absolute; top: 0; bottom: 0; left: 50%;
+    background: linear-gradient(to right, var(--gold), rgba(245,197,66,0.15));
+    width: 0%; transition: width 0.22s ease-out; }
+  #meter-sell { position: absolute; top: 0; bottom: 0; right: 50%;
+    background: linear-gradient(to left, var(--jade-dim), rgba(127,212,138,0.15));
+    width: 0%; transition: width 0.22s ease-out; }
+  #meter-center { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
+    margin-left: -1px; background: rgba(255,255,255,0.75); z-index: 2; }
+  #meter-blah { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: space-between; padding: 0 10px; z-index: 3;
+    font: 700 10px/1 "Consolas", monospace; letter-spacing: 0.1em; pointer-events: none; }
+  #meter-blah .b { color: var(--gold); } #meter-blah .s { color: var(--jade); }
+  .sword { font-size: 14px; filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); }
+
+  /* ---------- cat labels ---------- */
+  .cat-tag { position: fixed; bottom: 18px; z-index: 10;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+    padding: 6px 14px; font: 700 12px/1.4 "Consolas", monospace; letter-spacing: 0.08em;
+    backdrop-filter: blur(6px); pointer-events: none; }
+  .cat-tag small { display: block; font-weight: 400; font-size: 9px;
+    color: var(--ink-dim); letter-spacing: 0.14em; }
+  #tag-buy { right: 16px; text-align: right; color: var(--gold); border-right: 3px solid var(--gold); }
+  #tag-sell { left: 16px; text-align: left; color: var(--jade); border-left: 3px solid var(--jade); }
+
+  /* ---------- trade callouts ---------- */
+  #callouts { position: fixed; inset: 0; z-index: 9; pointer-events: none; overflow: hidden; }
+  .callout { position: absolute; will-change: transform, opacity;
+    font: 800 15px/1 "Consolas", monospace; padding: 5px 10px; border-radius: 8px;
+    animation: callout-float 2.2s ease-out forwards; white-space: nowrap;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
+  .callout.buy { color: #FFE08A; background: rgba(120,84,10,0.55);
+    border: 1px solid rgba(245,197,66,0.6); }
+  .callout.sell { color: #B8F0C4; background: rgba(9,61,51,0.55);
+    border: 1px solid rgba(127,212,138,0.6); }
+  .callout .qty { font-weight: 400; font-size: 11px; opacity: 0.85; margin-left: 5px; }
+  .callout.whale { font-size: 19px; animation: callout-float 2.6s ease-out forwards; }
+  @keyframes callout-float {
+    0%   { opacity: 0; transform: translateY(8px) scale(0.8); }
+    12%  { opacity: 1; transform: translateY(0) scale(1.06); }
+    22%  { transform: translateY(-2px) scale(1); }
+    75%  { opacity: 0.9; }
+    100% { opacity: 0; transform: translateY(-64px) scale(0.96); }
+  }
+
+  /* ---------- status line ---------- */
+  #status { position: fixed; top: 10px; right: 12px; z-index: 10;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+    padding: 5px 10px; font: 600 10px/1 "Consolas", monospace; letter-spacing: 0.1em;
+    color: var(--ink-dim); backdrop-filter: blur(6px); }
+  #status-dot { width: 8px; height: 8px; border-radius: 50%;
+    background: #666; box-shadow: 0 0 6px transparent; transition: background 0.3s; }
+  #status-dot.live { background: #35D07F; box-shadow: 0 0 6px #35D07F; animation: pulse 2s infinite; }
+  #status-dot.demo { background: #F5A623; box-shadow: 0 0 6px #F5A623; }
+  #status-dot.connecting { background: #F5C542; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  #status-mode { color: var(--ink); }
+
+  /* ---------- title ---------- */
+  #brand { position: fixed; top: 10px; left: 12px; z-index: 10; pointer-events: none; }
+  #brand h1 { margin: 0; font: 700 15px/1.2 "Consolas", monospace; letter-spacing: 0.18em;
+    color: var(--gold); text-shadow: 0 1px 8px rgba(0,0,0,0.8); }
+  #brand p { margin: 1px 0 0; font: 400 9px/1.4 "Consolas", monospace;
+    letter-spacing: 0.12em; color: var(--ink-dim); }
+
+  /* ---------- fallback notice ---------- */
+  #nogl { position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center; background: #05060F;
+    text-align: center; padding: 24px; }
+  #nogl div { max-width: 420px; }
+  #nogl h2 { color: var(--gold); font: 700 18px/1.4 "Consolas", monospace; }
+  #nogl p { color: var(--ink-dim); font: 400 13px/1.6 "Segoe UI", sans-serif; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 640px) {
+    #brand p { display: none; }
+    #brand h1 { font-size: 12px; }
+    .hud-cell { padding: 2px 8px; }
+    #hud .hud-cell.hud-24h { display: none; }
+    .hud-value { font-size: 15px; }
+    #meter { width: 60vw; top: 76px; }
+    .cat-tag { font-size: 10px; padding: 4px 8px; bottom: 12px; }
+    .callout { font-size: 12px; }
+    .callout.whale { font-size: 15px; }
+    #status { top: auto; bottom: 12px; right: 10px; }
+  }
+  @media (max-height: 460px) { #meter { display: none; } }
+  @media (max-width: 420px) {
+    .hud-cell:last-child { display: none; } /* trades/s yields room to the title */
+    #brand h1 { font-size: 10px; letter-spacing: 0.1em; }
+  }
+</style>
+</head>
+<body>
+<div id="duel-scene"></div>
+
+<div id="brand">
+  <h1>⚔ THE ROPE DUEL</h1>
+  <p>BUY CAT vs SELL CAT &middot; LIVE BTC/USDT ORDER FLOW</p>
+</div>
+
+<div id="hud" aria-live="off">
+  <div class="hud-cell">
+    <span class="hud-label">BTC / USDT</span>
+    <span class="hud-value" id="price">connecting&hellip;</span>
+  </div>
+  <div class="hud-cell hud-24h">
+    <span class="hud-label">24h</span>
+    <span id="chg24h">&mdash;</span>
+  </div>
+  <div class="hud-cell">
+    <span class="hud-label">Trades / s</span>
+    <span class="hud-value" id="tps" style="color: var(--ink)">0</span>
+  </div>
+</div>
+
+<div id="meter" role="meter" aria-label="buy versus sell pressure">
+  <div id="meter-buy"></div>
+  <div id="meter-sell"></div>
+  <div id="meter-center"></div>
+  <div id="meter-blah">
+    <span class="s">&#9876; SELL</span>
+    <span class="b">BUY &#9876;</span>
+  </div>
+</div>
+
+<div class="cat-tag" id="tag-sell">
+  &#9876; SULTAN BIGOTES
+  <small>SELL PRESSURE</small>
+</div>
+<div class="cat-tag" id="tag-buy">
+  DON GATO &#9876;
+  <small>BUY PRESSURE</small>
+</div>
+
+<div id="callouts"></div>
+
+<div id="status">
+  <span id="status-dot"></span>
+  <span id="status-mode">CONNECTING</span>
+</div>
+
+<div id="nogl">
+  <div>
+    <h2>&#9876; WebGL needed for the duel</h2>
+    <p>Your browser could not create a WebGL context, so the cats cannot take the
+    rope. Try Chrome, Edge, or Firefox with hardware acceleration enabled &mdash;
+    the live BTC/USDT price HUD above keeps working once WebGL is available.</p>
+  </div>
+</div>
+
+<!-- feed module: UMD, exposes window.BtcTradeFeed -->
+<script src="./feed.js"></script>
+<!-- integrated bundle: three + duel scene + adapter (built by npm run build) -->
+<script src="./bundle.js"></script>
+</body>
+</html>
