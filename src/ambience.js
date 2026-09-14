@@ -4,25 +4,28 @@
 import * as THREE from '../vendor/three.module.js';
 import { ARENA, DIM } from './palette.js';
 
-// ---------- distant skyline + sierra (behind the wall, in the arch voids) ----------
+// ---------- distant sierra (a LOW horizon band behind the arcade) ----------
+// v3: with the wall now a low parapet, the horizon silhouette must sit just
+// above the parapet line (~y 4-7) and leave everything above it to the stars.
 export function buildSkyline(scene) {
   const group = new THREE.Group();
 
-  // sierra ridge: two layers of jagged dark hills
-  function ridge(width, height, base, color, seed, y0) {
+  function ridge(width, height, z, color, seed, bottomY) {
     const c = document.createElement('canvas');
     c.width = 1024; c.height = 256;
     const g = c.getContext('2d');
     g.clearRect(0, 0, 1024, 256);
     g.fillStyle = color;
-    g.beginPath();
-    g.moveTo(0, 256);
-    let y = 120;
     let v = seed;
     const rnd = () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; };
+    // ridge line constrained to the lower third of the canvas: hills, not mountains
+    const lo = 256 * 0.55, hi = 256 * 0.85;
+    g.beginPath();
+    g.moveTo(0, 256);
+    let y = (lo + hi) / 2;
     for (let x = 0; x <= 1024; x += 16) {
-      y += (rnd() - 0.5) * 34;
-      y = Math.max(30, Math.min(210, y));
+      y += (rnd() - 0.5) * 26;
+      y = Math.max(lo, Math.min(hi, y));
       g.lineTo(x, y);
     }
     g.lineTo(1024, 256);
@@ -34,56 +37,12 @@ export function buildSkyline(scene) {
       new THREE.PlaneGeometry(width, height),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false })
     );
-    m.position.set(0, y0, base);
-    m.renderOrder = -3; // drawn before the moon (-1): moon stays visible in the arch
+    m.position.set(0, bottomY + height / 2, z);
+    m.renderOrder = -3; // behind arches/moon (-1)
     return m;
   }
-  group.add(ridge(150, 30, -52, '#141126', 12345, 6));
-  group.add(ridge(120, 22, -48, '#1B1830', 987654, 5));
-
-  // village silhouette: whitewashed cubes + a bell tower, warm windows
-  const c = document.createElement('canvas');
-  c.width = 1024; c.height = 256;
-  const g = c.getContext('2d');
-  g.clearRect(0, 0, 1024, 256);
-  let v = 424242;
-  const rnd = () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; };
-  const skyY = 190;
-  for (let x = 40; x < 1000;) {
-    const w = 26 + rnd() * 46;
-    const h = 26 + rnd() * 58;
-    g.fillStyle = '#221E33';
-    g.fillRect(x, skyY - h, w, h + 66);
-    // roof hint
-    g.fillStyle = '#191527';
-    g.fillRect(x - 3, skyY - h - 5, w + 6, 6);
-    // windows: tiny warm rectangles, sparse
-    if (rnd() < 0.8) {
-      const n = 1 + Math.floor(rnd() * 3);
-      for (let i = 0; i < n; i++) {
-        g.fillStyle = rnd() < 0.7 ? 'rgba(255,190,110,0.85)' : 'rgba(255,220,160,0.6)';
-        g.fillRect(x + 5 + rnd() * (w - 12), skyY - h + 8 + rnd() * (h - 18), 3.5, 5);
-      }
-    }
-    x += w + 6 + rnd() * 22;
-  }
-  // bell tower with arch
-  g.fillStyle = '#221E33';
-  g.fillRect(492, skyY - 118, 34, 184);
-  g.fillStyle = '#0E0B18';
-  g.beginPath(); g.arc(509, skyY - 96, 9, Math.PI, 0); g.fill();
-  g.fillRect(500, skyY - 96, 18, 22);
-  g.fillStyle = 'rgba(255,200,120,0.9)';
-  g.fillRect(505, skyY - 90, 8, 10);
-  const vtex = new THREE.CanvasTexture(c);
-  vtex.colorSpace = THREE.SRGBColorSpace;
-  const village = new THREE.Mesh(
-    new THREE.PlaneGeometry(96, 24),
-    new THREE.MeshBasicMaterial({ map: vtex, transparent: true, depthWrite: false, fog: false })
-  );
-  village.position.set(-4, 7.2, -46);
-  village.renderOrder = -2; // after ridges, before the moon: moon wins the center arch
-  group.add(village);
+  group.add(ridge(170, 10.0, -54, '#161229', 12345, 5.6));  // far range
+  group.add(ridge(150, 8.0, -46, '#1E1836', 987654, 5.0));  // near range
 
   scene.add(group);
   return group;

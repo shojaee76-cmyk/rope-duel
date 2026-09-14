@@ -150,34 +150,34 @@ export function buildClouds(scene) {
     const c = document.createElement('canvas');
     c.width = 256; c.height = 128;
     const g = c.getContext('2d');
-    // layered soft blobs = wisp silhouette (BOLD: must read against the moon)
+    // layered soft blobs = wisp silhouette (soft: must not blow out on a
+    // dark sky; the moon crossing supplies the contrast)
     for (let i = 0; i < 26; i++) {
       const x = 30 + Math.random() * 196, y = 40 + Math.random() * 55;
       const r = 16 + Math.random() * 36;
       const gr = g.createRadialGradient(x, y, 0, x, y, r);
-      const a = 0.16 + Math.random() * 0.22;
-      gr.addColorStop(0, `rgba(205,215,245,${a})`);
-      gr.addColorStop(1, 'rgba(205,215,245,0)');
+      const a = 0.09 + Math.random() * 0.13;
+      gr.addColorStop(0, `rgba(198,208,240,${a})`);
+      gr.addColorStop(1, 'rgba(198,208,240,0)');
       g.fillStyle = gr;
       g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
     }
     return canvasTexture(c);
   }
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 9; i++) {
     const mat = new THREE.MeshBasicMaterial({
       map: wispTexture(i), transparent: true, depthWrite: false, fog: false,
       opacity: 0.5 + Math.random() * 0.3, side: THREE.DoubleSide,
     });
-    const w = 3.4 + Math.random() * 3.2;
+    const w = 5 + Math.random() * 6;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.4), mat);
-    // inside the visible sky sliver above the wall (wall top ~8.6 at z=-7,
-    // camera sees up to ~y7.5 at z=-5): in front of the moon (-7.45),
-    // behind the rope (z=0), so wisps visibly CROSS the moon disc
-    m.position.set((Math.random() - 0.5) * 26, 7.6 + Math.random() * 1.6, -5.6 - Math.random() * 0.8);
+    // open-sky framing (v3): wisps drift across the whole sky band and
+    // periodically cross the moon disc; z sits in front of the moon (-7.45)
+    m.position.set((Math.random() - 0.5) * 22, 5.2 + Math.random() * 5.2, -4.6 - Math.random() * 1.9);
     m.rotation.x = -0.05;
     m.renderOrder = 2; // drawn after the moon (-1): wisps overdraw the moon disc
     group.add(m);
-    wisps.push({ m, speed: 0.12 + Math.random() * 0.2, phase: Math.random() * 100 });
+    wisps.push({ m, speed: 0.12 + Math.random() * 0.22, phase: Math.random() * 100 });
   }
   scene.add(group);
   return {
@@ -188,9 +188,9 @@ export function buildClouds(scene) {
         // drift rightward, wrap within the visible sky band
         if (w.m.position.x > 18) w.m.position.x = -18;
         w.m.position.y += Math.sin(t * 0.3 + w.phase) * 0.0035;
-        // gentle opacity breathing (kept >= 0.35 so wisps stay visible)
-        w.m.material.opacity = 0.62 + 0.3 * Math.sin(t * 0.23 + w.phase);
-        if (w.m.material.opacity < 0.35) w.m.material.opacity = 0.35;
+        // gentle opacity breathing (kept in a soft band: never blows out)
+        w.m.material.opacity = 0.34 + 0.22 * Math.sin(t * 0.23 + w.phase);
+        if (w.m.material.opacity < 0.18) w.m.material.opacity = 0.18;
       }
     },
   };

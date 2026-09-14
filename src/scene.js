@@ -18,11 +18,15 @@ import { buildSkyline, buildFireflies, buildFountainWater, buildEmberDrift } fro
 export function createDuelScene(container, opts = {}) {
   // renderer / scene / camera (spec 1.1)
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  // v3: crisp edges matter much more now that the frame is a close shot of the
+  // duelists; cap at 2x on desktop (vsync-limited anyway) and 1.25x on mobile.
+  const desktopQuality = (opts.vfxScale || 1) > 0.5;
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, desktopQuality ? 2 : 1.25));
   renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
-  // shadows off: a moonlit night scene gains little from a full second pass
-  // and the cats/arena cost ~2x draw calls with it (perf, spec: 30+ FPS).
-  renderer.shadowMap.enabled = false;
+  // v3: contact shadows ON (desktop) so the cats ground on the rope instead of
+  // floating against the sky. Mobile keeps the single-pass render.
+  renderer.shadowMap.enabled = desktopQuality;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.35;
   container.appendChild(renderer.domElement);
@@ -33,15 +37,18 @@ export function createDuelScene(container, opts = {}) {
   function aspect() {
     return (container.clientWidth || 1280) / (container.clientHeight || 720);
   }
-  const camera = new THREE.PerspectiveCamera(45, aspect(), 0.1, 200);
-  camera.position.set(0, 2.4, 11);
-  camera.lookAt(0, 2.2, 0);
+  const camera = new THREE.PerspectiveCamera(40, aspect(), 0.1, 200);
+  camera.position.set(0, 2.55, 6.8);
+  camera.lookAt(0, 3.15, 0);
 
-  // lights (spec 5.4)
-  const moonlight = new THREE.DirectionalLight('#BFD4FF', 0.5);
+  // lights (spec 5.4) - v3: stronger moon key + rims so the dark cat keeps a
+  // silhouette against the now-open night sky
+  const moonlight = new THREE.DirectionalLight('#BFD4FF', 0.78);
   moonlight.position.set(0, 14, -8);
   moonlight.castShadow = true;
   moonlight.shadow.mapSize.set(1024, 1024);
+  moonlight.shadow.bias = -0.0008;
+  moonlight.shadow.normalBias = 0.02;
   moonlight.shadow.camera.left = -12;
   moonlight.shadow.camera.right = 12;
   moonlight.shadow.camera.top = 8;
@@ -52,8 +59,8 @@ export function createDuelScene(container, opts = {}) {
   const ambient = new THREE.AmbientLight('#2A2438', 0.55);
   scene.add(ambient);
 
-  const rimA = new THREE.PointLight('#F5C542', 30, 7, 1.6);
-  const rimB = new THREE.PointLight('#7FD48A', 30, 7, 1.6);
+  const rimA = new THREE.PointLight('#F5C542', 44, 9, 1.6);
+  const rimB = new THREE.PointLight('#7FD48A', 44, 9, 1.6);
   scene.add(rimA, rimB);
 
   const fill = new THREE.SpotLight('#FFD9A0', 95, 26, 0.75, 0.6, 1.4);
@@ -73,6 +80,12 @@ export function createDuelScene(container, opts = {}) {
   catA.x = 1.4;
   catB.x = -1.4;
   scene.add(catA.root, catB.root);
+  // v3: cast contact shadows (desktop quality only) so the duelists sit ON the rope
+  if (desktopQuality) {
+    for (const cat of [catA, catB]) {
+      cat.root.traverse((o) => { if (o.isMesh && o.material && o.material.transparent !== true) o.castShadow = true; });
+    }
+  }
 
   const arena = buildArena(scene);
   const vfx = new VFX(scene, opts.vfxScale || 1);
@@ -315,20 +328,24 @@ export function createDuelScene(container, opts = {}) {
     const moon = arena.userData.moon;
     if (moon) {
       const m = moon.material;
-      m.color.setScalar(1 + amb.moonPulse * 0.55 + Math.sin(simTime * 0.8) * 0.05);
+      m.color.setScalar(1 + amb.moonPulse * 0.34 + Math.sin(simTime * 0.8) * 0.04);
       moon.scale.setScalar(1 + amb.moonPulse * 0.06);
     }
 
-    // camera: default shot + shake + gentle drift + mouse parallax (spec 1.1)
+    // camera: CLOSE shot on the cats + gentle drift + shake + mouse parallax.
+    // v3: pulled in from z=11 to z=7.2, tilted up so the open sky reads, and
+    // panned slightly toward the midpoint of the two fighters so a close
+    // framing never loses them as pressure swings the duel off-center.
     const shk = Math.max(shake.t, 0);
     if (shk > 0) shake.t -= rawDt;
     const s = (shk / 0.1) * shake.amp;
+    const panX = (catA.x + catB.x) * 0.42;
     camera.position.set(
-      Math.sin(simTime * 0.11) * 0.8 + (Math.random() - 0.5) * s + amb.mouse.x * 0.9,
-      2.4 + Math.sin(simTime * 0.07) * 0.3 + (Math.random() - 0.5) * s - amb.mouse.y * 0.5,
-      11
+      panX + Math.sin(simTime * 0.11) * 0.45 + (Math.random() - 0.5) * s + amb.mouse.x * 0.7,
+      2.55 + Math.sin(simTime * 0.07) * 0.2 + (Math.random() - 0.5) * s - amb.mouse.y * 0.4,
+      6.8
     );
-    camera.lookAt(0, 2.2, 0);
+    camera.lookAt(panX * 0.85, 3.15, 0);
 
     renderer.render(scene, camera);
   }

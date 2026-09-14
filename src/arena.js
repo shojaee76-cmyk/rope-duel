@@ -173,71 +173,90 @@ function moonTexture() {
   return canvasTexture(c);
 }
 
-// vista seen THROUGH the side arches: mini night sky with stars, hills,
-// whitewashed village with warm windows, cypress silhouettes (v2 upgrade
-// replacing the flat black void planes). Elements drawn LARGE: the opening
-// is ~100px on screen, so windows need glow halos to read as village lights.
-function vistaTexture(seed) {
+// vista seen THROUGH the arch openings (v3): distant whitewashed village with
+// glowing windows on a moonlit horizon, masked to the EXACT arch shape so no
+// panel corners float against the open sky. Plane width = 2*rIn, height =
+// rIn + under (the `under` strip sits behind the parapet, never visible).
+function vistaTexture(seed, rIn) {
+  const under = 0.42;
+  const W = 384;
+  const H = Math.max(72, Math.round(W * (rIn + under) / (2 * rIn)));
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 128;
+  c.width = W; c.height = H;
   const g = c.getContext('2d');
   let v = seed;
   const rnd = () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; };
-  // sky gradient (brighter than the main sky so the opening glows)
-  const grad = g.createLinearGradient(0, 0, 0, 128);
-  grad.addColorStop(0, '#101736');
-  grad.addColorStop(0.5, '#1D1840');
-  grad.addColorStop(0.78, '#3A2540');
-  grad.addColorStop(1, '#6B3E24');
+  const springRow = (rIn / (rIn + under)) * H;   // world y=0 (arch springline)
+  // sky above the horizon (warmer than the main sky: the opening glows)
+  const grad = g.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0E1430');
+  grad.addColorStop(0.62, '#1B1740');
+  grad.addColorStop(0.88, '#40273C');
+  grad.addColorStop(1, '#7A4526');
   g.fillStyle = grad;
-  g.fillRect(0, 0, 256, 128);
-  // stars (upper half), a few big
-  for (let i = 0; i < 40; i++) {
-    const x = rnd() * 256, y = rnd() * 58;
-    const b = 0.5 + rnd() * 0.5;
-    g.fillStyle = `rgba(${215 + rnd() * 40 | 0},${220 + rnd() * 35 | 0},255,${b})`;
+  g.fillRect(0, 0, W, H);
+  // stars
+  for (let i = 0; i < 60; i++) {
+    const x = rnd() * W, y = rnd() * springRow * 0.9;
+    g.fillStyle = `rgba(220,226,255,${0.4 + rnd() * 0.6})`;
     const s = rnd() < 0.15 ? 2.5 : 1.5;
     g.fillRect(x, y, s, s);
   }
-  // far ridge (lighter than black: separates from the void)
-  g.fillStyle = '#241D3A';
-  g.beginPath(); g.moveTo(0, 128);
-  let y = 82;
-  for (let x = 0; x <= 256; x += 20) { y += (rnd() - 0.5) * 14; y = Math.max(66, Math.min(96, y)); g.lineTo(x, y); }
-  g.lineTo(256, 128); g.closePath(); g.fill();
-  // village: FEW BIG cubes with glowing windows (reads at distance);
-  // placed HIGH in the texture so they land in the widest visible band
-  for (let x = 8; x < 240;) {
-    const w = 30 + rnd() * 30, h = 26 + rnd() * 28, top = 92 - h;
-    g.fillStyle = '#2B2440';
-    g.fillRect(x, top, w, h + 36);
-    g.fillStyle = '#1C1730';
-    g.fillRect(x - 2, top - 3, w + 4, 4);
-    if (rnd() < 0.95) {
-      const wx = x + 6 + rnd() * (w - 16), wy = top + 7 + rnd() * (h - 16);
-      // glow halo then core (big: 6x8 core + 16px halo = visible at 100px opening)
-      g.fillStyle = 'rgba(255,180,90,0.45)';
-      g.fillRect(wx - 6, wy - 6, 16, 16);
-      g.fillStyle = rnd() < 0.7 ? 'rgba(255,205,130,1)' : 'rgba(255,236,185,0.9)';
-      g.fillRect(wx, wy, 6, 8);
-    }
-    x += w + 6 + rnd() * 10;
+  // sierra ridge sitting on the horizon
+  g.fillStyle = '#251E3C';
+  g.beginPath();
+  g.moveTo(0, springRow);
+  let y = springRow - 14;
+  for (let x = 0; x <= W; x += 22) {
+    y += (rnd() - 0.5) * 13;
+    y = Math.max(springRow - 30, Math.min(springRow - 4, y));
+    g.lineTo(x, y);
   }
-  // two cypress silhouettes (tall, dark against the glow)
-  for (const cx of [22 + rnd() * 16, 214 + rnd() * 18]) {
-    g.fillStyle = '#0D0F1D';
+  g.lineTo(W, springRow);
+  g.closePath();
+  g.fill();
+  // village: big whitewashed cubes, glowing windows (must read at ~100 px)
+  for (let x = 6; x < W - 20;) {
+    const w = 26 + rnd() * 30, h = 18 + rnd() * 26, top = springRow - h;
+    g.fillStyle = '#2E2743';
+    g.fillRect(x, top, w, h + 6);
+    g.fillStyle = '#1E1832';
+    g.fillRect(x - 2, top - 3, w + 4, 4);
+    const n = 1 + Math.floor(rnd() * 2);
+    for (let k = 0; k < n; k++) {
+      const wx = x + 5 + rnd() * (w - 14), wy = top + 6 + rnd() * Math.max(4, h - 14);
+      g.fillStyle = 'rgba(255,178,88,0.45)';
+      g.fillRect(wx - 5, wy - 5, 14, 14);
+      g.fillStyle = rnd() < 0.7 ? 'rgba(255,206,132,1)' : 'rgba(255,238,190,0.9)';
+      g.fillRect(wx, wy, 5, 7);
+    }
+    x += w + 6 + rnd() * 12;
+  }
+  // cypress silhouettes
+  for (const cx of [18 + rnd() * 20, W - 40 + rnd() * 18]) {
+    g.fillStyle = '#111324';
     g.beginPath();
-    g.moveTo(cx, 116);
-    g.quadraticCurveTo(cx - 8, 86, cx, 48 + rnd() * 10);
-    g.quadraticCurveTo(cx + 8, 86, cx, 116);
+    g.moveTo(cx, springRow + 6);
+    g.quadraticCurveTo(cx - 8, springRow - 26, cx, springRow - 46 - rnd() * 10);
+    g.quadraticCurveTo(cx + 8, springRow - 26, cx, springRow + 6);
     g.fill();
   }
-  // warm ground haze so the opening bottom glows instead of going black
-  const hz = g.createLinearGradient(0, 100, 0, 128);
-  hz.addColorStop(0, 'rgba(120,70,40,0)');
-  hz.addColorStop(1, 'rgba(150,88,45,0.5)');
+  // warm haze hugging the horizon
+  const hz = g.createLinearGradient(0, springRow - 26, 0, springRow + 20);
+  hz.addColorStop(0, 'rgba(150,88,45,0)');
+  hz.addColorStop(1, 'rgba(170,100,50,0.45)');
   g.fillStyle = hz;
-  g.fillRect(0, 100, 256, 28);
+  g.fillRect(0, springRow - 26, W, 46);
+  // ---- mask to the arch opening: half-disc above the springline + rect below
+  g.globalCompositeOperation = 'destination-in';
+  g.beginPath();
+  g.moveTo(0, H);
+  g.lineTo(0, springRow);
+  g.arc(W / 2, springRow, W / 2, Math.PI, 0, false);
+  g.lineTo(W, H);
+  g.closePath();
+  g.fill();
+  g.globalCompositeOperation = 'source-over';
   return canvasTexture(c);
 }
 
@@ -272,7 +291,7 @@ export function buildArena(scene) {
     new THREE.PlaneGeometry(4.6, 4.6),
     new THREE.MeshBasicMaterial({ map: moonTexture(), transparent: true, fog: false, depthWrite: false })
   );
-  moon.position.set(0, 5.9, -7.45);
+  moon.position.set(0, 6.35, -7.45);
   moon.renderOrder = -1;
   arena.add(moon);
   groups.moon = moon;
@@ -304,18 +323,31 @@ export function buildArena(scene) {
     0, dadoH + friezeH / 2, wallZ + 0.01
   );
   arena.add(frieze);
-  // upper wall above arches + crenellations
-  const upper = mesh(new THREE.BoxGeometry(wallW, wallH - 5.4, 0.5), wallMat, 0, (wallH + 5.4) / 2, wallZ);
-  arena.add(upper);
-  // merlons: square (Christian) alternating with stepped (Moorish)
+  // ---- v3: OPEN ARCADE against the night sky ----
+  // The old solid upper wall (y 5.4..8) + tall crenellations blocked almost
+  // the whole sky. The wall is now a low parapet at the arch springline, so
+  // the five arches stand against the stars and the BTC moon hangs free.
+  const copingMat = std(ARENA.stoneShadow, 'cloth');
+  const coping = mesh(new THREE.BoxGeometry(wallW, 0.16, 0.62), copingMat, 0, arcSpringY + 0.08, wallZ + 0.02);
+  arena.add(coping);
+  // engaged piers on the wall face at every point where two arch legs land:
+  // this is what makes the low parapet read as a real arcade instead of
+  // hoops floating in the sky (v3)
+  const pierMat = std(ARENA.stoneShadow, 'cloth');
+  for (const px of [-12.1, -7.4, -3.3, 3.3, 7.4, 12.1]) {
+    arena.add(mesh(new THREE.BoxGeometry(1.0, 3.35, 0.68), pierMat, px, 1.675, wallZ + 0.09));
+    // impost/capital block where the thin arch fans out (also the merlon base)
+    arena.add(mesh(new THREE.BoxGeometry(1.2, 0.22, 0.76), std(ARENA.stoneWall, 'cloth'), px, 3.46, wallZ + 0.09));
+  }
+  // merlons: square (Christian) alternating with stepped (Moorish), placed
+  // only on the pier tops BETWEEN the arches so they never clash with a ring
   const merlonMat = std(ARENA.stoneWall, 'cloth');
-  for (let i = 0; i < 13; i++) {
-    const x = -12 + i * 2;
-    const stepped = i % 2 === 0;
-    const m = mesh(new THREE.BoxGeometry(0.9, 0.5, 0.5), merlonMat, x, wallH + 0.25, wallZ);
+  for (const x of [-12, -7.4, -3.3, 3.3, 7.4, 12]) {
+    const stepped = Math.abs(x) > 9 || Math.abs(x) < 5;
+    const m = mesh(new THREE.BoxGeometry(0.9, 0.42, 0.5), merlonMat, x, arcSpringY + 0.37, wallZ);
     arena.add(m);
     if (stepped) {
-      arena.add(mesh(new THREE.BoxGeometry(0.5, 0.22, 0.5), merlonMat, x, wallH + 0.61, wallZ));
+      arena.add(mesh(new THREE.BoxGeometry(0.5, 0.2, 0.5), merlonMat, x, arcSpringY + 0.67, wallZ));
     }
   }
 
@@ -339,14 +371,18 @@ export function buildArena(scene) {
     const startAng = bay.type === 'horseshoe'
       ? Math.PI + (sweep - Math.PI) / 2 - Math.PI
       : Math.PI;
-    // vista behind the arch opening (v2): mini night-sky + village replaces
-    // the flat black void (center bay keeps the BTC moon instead)
+    // vista inside the arch opening (v3): masked to the arch shape, sized to
+    // the ring's inner radius (center bay keeps the BTC moon instead)
     if (bay.r < 2) {
-      const voidH = bay.r * 1.1 + 0.3;
+      const rIn = bay.r - 0.16;
+      const under = 0.42;
       const vista = mesh(
-        new THREE.PlaneGeometry(bay.r * 2.0, voidH),
-        new THREE.MeshBasicMaterial({ map: vistaTexture(1000 + bay.x * 37), fog: false }),
-        0, voidH / 2 - 0.1, -0.25
+        new THREE.PlaneGeometry(2 * rIn, rIn + under),
+        new THREE.MeshBasicMaterial({
+          map: vistaTexture(1000 + Math.round(bay.x * 37), rIn),
+          fog: false, transparent: true, depthWrite: false,
+        }),
+        0, (rIn - under) / 2 - 0.12, -0.25
       );
       arch.add(vista);
     }
@@ -354,13 +390,16 @@ export function buildArena(scene) {
     const ring = new THREE.Mesh(torus(bay.r, 0.16, sweep), sand);
     ring.position.y = bay.type === 'horseshoe' ? -0.12 : 0;
     arch.add(ring);
-    // alternating voussoirs: small boxes along the arc, white/emerald
-    const n = 13;
+    // alternating voussoirs: boxes along the arc, sized to OVERLAP so the ring
+    // reads as continuous masonry (v3: no bead-gaps between blocks)
+    const arcLen = bay.r * sweep;
+    const n = Math.max(13, Math.round(arcLen / 0.24));
+    const seg = arcLen / (n - 1);
     for (let i = 0; i < n; i++) {
       const ang = startAng + (i / (n - 1)) * sweep;
       const vx = Math.cos(ang) * bay.r;
       const vy = Math.sin(ang) * bay.r + ring.position.y;
-      const v = mesh(new THREE.BoxGeometry(0.3, 0.34, 0.42), i % 2 ? white : green, vx, vy, 0);
+      const v = mesh(new THREE.BoxGeometry(seg * 1.18, 0.34, 0.42), i % 2 ? white : green, vx, vy, 0);
       v.rotation.z = ang + Math.PI / 2;
       arch.add(v);
     }
