@@ -395,7 +395,7 @@ export function hempCanvas({ seed = 31, size = 256, twistPeriod = 96 } = {}) {
   const shade = g.createLinearGradient(0, 0, 0, size);
   shade.addColorStop(0, 'rgba(255,246,224,0.16)');
   shade.addColorStop(0.35, 'rgba(255,255,255,0)');
-  shade.addColorStop(0.5, 'rgba(0,0,0,0.22)');
+  shade.addColorStop(0.5, 'rgba(0,0,0,0.12)');
   shade.addColorStop(0.75, 'rgba(255,255,255,0)');
   shade.addColorStop(1, 'rgba(255,246,224,0.14)');
   g.fillStyle = shade;
@@ -411,4 +411,68 @@ export function hempTexture({ repeatX = 4, repeatY = 1, seed = 31, twists = 2 } 
   const rough = roughnessFrom(c, 0.45, 0.95);
   rough.repeat.copy(map.repeat);
   return { map, bump, rough };
+}
+
+// ---------- starched linen pleats (Spanish golilla ruff, dishdashah collar) ----------
+// The pleats run around the collar, so in UV they are vertical stripes on the
+// cylinder's side: light ridge, dark valley, plus a little linen tooth.
+export function pleatCanvas({ seed = 71, size = 128, pleats = 26, base = '#fbf7ee', dark = 'rgba(150,140,124,0.42)' } = {}) {
+  const { c, g } = surface(size, base);
+  const rnd = prng(seed);
+  const w = size / pleats;
+  for (let i = 0; i < pleats; i++) {
+    const x = i * w;
+    const grd = g.createLinearGradient(x, 0, x + w, 0);
+    grd.addColorStop(0, dark);
+    grd.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    grd.addColorStop(0.7, 'rgba(255,255,255,0.1)');
+    grd.addColorStop(1, dark);
+    g.fillStyle = grd;
+    g.fillRect(x, 0, w, size);
+  }
+  for (let i = 0; i < 500; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.16)' : 'rgba(120,112,98,0.12)';
+    g.fillRect(rnd() * size, rnd() * size, 2, 1 + rnd() * 2);
+  }
+  return c;
+}
+
+export function pleatTexture({ repeatX = 1, repeatY = 1, ...o } = {}) {
+  const c = pleatCanvas(o);
+  const map = canvasTexture(c, { repeatX, repeatY, srgb: true });
+  const bump = bumpFrom(c, 1.1);
+  bump.repeat.copy(map.repeat);
+  return { map, bump };
+}
+
+// ---------- slashed doublet (the puffed, slit sleeves of a 16th c. doublet) ----------
+export function slashedCanvas({ seed = 73, size = 128, base = '#ffffff', slash = 'rgba(28,14,10,0.66)', n = 7 } = {}) {
+  const { c, g } = surface(size, base);
+  const rnd = prng(seed);
+  for (let i = 0; i < n; i++) {
+    const y = (i + 0.5) * (size / n);
+    const h = (size / n) * (0.3 + rnd() * 0.25);
+    g.fillStyle = slash;
+    g.beginPath();
+    g.ellipse(size / 2, y, size * 0.34, h / 2, 0, 0, Math.PI * 2);
+    g.fill();
+    // the liner showing through the slit
+    g.fillStyle = 'rgba(255,240,214,0.5)';
+    g.beginPath();
+    g.ellipse(size / 2, y + h * 0.28, size * 0.26, h * 0.16, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  for (let i = 0; i < 320; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.14)' : 'rgba(50,30,20,0.14)';
+    g.fillRect(rnd() * size, rnd() * size, 2 + rnd() * 2, 1 + rnd() * 2);
+  }
+  return c;
+}
+
+export function slashTexture({ repeatX = 2, repeatY = 2, ...o } = {}) {
+  const c = slashedCanvas(o);
+  const map = canvasTexture(c, { repeatX, repeatY, srgb: true });
+  const bump = bumpFrom(c, 1.0);
+  bump.repeat.copy(map.repeat);
+  return { map, bump };
 }

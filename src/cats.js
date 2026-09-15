@@ -24,7 +24,7 @@
 //   lock           = blade-lock shove (0..1)   tremble = impact vibration (0..1)
 import * as THREE from '../vendor/three.module.js';
 import { CAT_A, CAT_B, MATERIALS, DIM } from './palette.js';
-import { furTexture, clothTexture, metalTexture, leatherTexture } from './tex.js';
+import { furTexture, clothTexture, metalTexture, leatherTexture, pleatTexture, slashTexture } from './tex.js';
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -302,11 +302,15 @@ export function buildDonGato() {
   const dome = mesh(new THREE.SphereGeometry(0.165, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), MA.steel);
   dome.scale.set(1.15, 1, 1.05);
   helm.add(dome);
-  const brim = mesh(torus(0.16, 0.02), MA.steel, 0, 0.045, 0);
+  const brim = mesh(torus(0.185, 0.024), MA.steel, 0, 0.04, 0);
   brim.rotation.x = Math.PI / 2;
-  brim.scale.set(1.2, 1.1, 1);
+  brim.scale.set(1.18, 1.05, 1);
   helm.add(brim);
-  helm.add(mesh(box(0.3, 0.045, 0.03), MA.steel, 0, 0.115, 0));
+  // morion comb: the tall fore-and-aft ridge that identifies the helmet
+  const comb = mesh(box(0.34, 0.075, 0.032), MA.steel, 0, 0.175, 0);
+  comb.rotation.z = -0.05;
+  helm.add(comb);
+  helm.add(mesh(box(0.2, 0.045, 0.028), MA.steel, -0.09, 0.13, 0));
   const trim = mesh(torus(0.165, 0.008), MA.goldBright, 0, 0.05, 0);
   trim.rotation.x = Math.PI / 2;
   trim.scale.set(1.2, 1.1, 1);
@@ -342,6 +346,45 @@ export function buildDonGato() {
     rig.spine.add(strap);
   }
 
+  // ---- Spanish knight kit ----
+  // starched golilla ruff (the pleated court collar that reads "Spanish"
+  // instantly), a gorget under it, puffed SLASHED sleeve caps, tall leather
+  // boots with folded cuffs, tassets over the thighs and a baldric.
+  const leatherPair = tex('leather', () => leatherTexture({ seed: 43 }));
+  const pleat = tex('pleat', () => pleatTexture({ pleats: 30 }));
+  const slashPair = tex('slash-doublet', () => slashTexture({ seed: 73, n: 6 }));
+  const ruffMat = std('#FBF7EE', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.05 }, pleat);
+  const ruff = mesh(new THREE.CylinderGeometry(0.16, 0.305, 0.1, 30, 1, true), ruffMat, 0.02, 0.47, 0);
+  ruff.rotation.z = -0.06;
+  rig.spine.add(ruff);
+  const ruff2 = mesh(new THREE.CylinderGeometry(0.135, 0.21, 0.06, 26, 1, true), ruffMat, 0.02, 0.545, 0);
+  ruff2.rotation.z = -0.06;
+  rig.spine.add(ruff2);
+  const gorget = mesh(torus(0.142, 0.032), MA.gold, 0.02, 0.415, 0);
+  gorget.rotation.x = Math.PI / 2;
+  gorget.scale.set(1, 1, 0.9);
+  rig.spine.add(gorget);
+  const slashMat = std(CAT_A.crimsonMain, 'cloth', { bumpScale: 0.06 }, slashPair);
+  for (const side of ['L', 'R']) {
+    const cap = mesh(sphere(0.1, 12, 10), slashMat, 0, -0.015, 0);
+    cap.scale.set(1, 0.76, 1.06);
+    rig.arms[side].shoulder.add(cap);
+    const band = mesh(torus(0.064, 0.012), MA.gold, 0, -0.2, 0);
+    band.rotation.x = Math.PI / 2;
+    rig.arms[side].shoulder.add(band);
+  }
+  // tassets + baldric across the cuirass
+  for (const sz of [-0.12, 0.12]) {
+    const tas = mesh(box(0.13, 0.15, 0.035), MA.gold, 0.055, -0.15, sz);
+    tas.rotation.z = 0.12;
+    tas.rotation.x = sz > 0 ? 0.12 : -0.12;
+    rig.hips.add(tas);
+  }
+  const baldric = mesh(box(0.052, 0.52, 0.028), std(CAT_A.leatherBrown, 'cloth', {}, leatherPair), 0.162, 0.27, 0.01);
+  baldric.rotation.z = 0.62;
+  rig.spine.add(baldric);
+  rig.spine.add(mesh(sphere(0.027, 10, 8), MA.goldBright, 0.19, 0.43, 0.01));
+
   // cape on the back (local -x), hangs to hock level, held by a gold collar
   const cape = buildCape();
   cape.position.set(-0.14, 0.5, 0);
@@ -368,7 +411,16 @@ export function buildDonGato() {
   rig.hips.add(belt);
   for (const side of ['L', 'R']) {
     rig.arms[side].elbow.add(mesh(cyl(0.055, 0.05, 0.1, 10), MA.gold, 0, -0.1, 0));
-    rig.legs[side].knee.add(mesh(box(0.05, 0.1, 0.06), MA.gold, 0, -0.12, 0.01));
+    // thigh-high leather boots with a folded cuff (the knight's footwear)
+    const bootMat = std(CAT_A.leatherBrown, 'cloth', { side: THREE.DoubleSide }, leatherPair);
+    const boot = mesh(new THREE.CylinderGeometry(0.066, 0.073, 0.28, 12, 1, true), bootMat, 0.004, -0.14, 0);
+    rig.legs[side].knee.add(boot);
+    const cuff = mesh(torus(0.079, 0.026), std(CAT_A.leatherBrown, 'cloth', {}, leatherPair), 0.004, -0.005, 0);
+    cuff.rotation.x = Math.PI / 2;
+    cuff.scale.set(1, 1, 0.88);
+    rig.legs[side].knee.add(cuff);
+    rig.legs[side].knee.add(mesh(sphere(0.017, 8, 6), MA.goldBright, 0.072, -0.02, 0));
+    rig.legs[side].knee.add(mesh(box(0.06, 0.03, 0.075), bootMat, -0.03, -0.245, 0));
   }
   rig.tail[5].add(mesh(torus(0.042, 0.012), MA.gold, 0, -0.1, 0));
 
@@ -444,47 +496,49 @@ export function buildSultanBigotes() {
   rig.ears[0].position.y = 0.24; rig.ears[0].position.z = -0.16;
   rig.ears[1].position.y = 0.24; rig.ears[1].position.z = 0.16;
 
-  // kaftan vest: open emerald cylinder, gap at the front (+x), silver trim
-  const kaftan = mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.42, 12, 1, true, 0.55, Math.PI * 1.9), MB.emerald, 0.01, 0.34, 0);
-  kaftan.material.side = THREE.DoubleSide;
-  rig.spine.add(kaftan);
-  for (const yy of [0.42, 0.28]) {
-    const trim = mesh(torus(0.17, 0.008), MB.silver, 0.01, yy, 0);
-    trim.rotation.x = Math.PI / 2;
-    trim.scale.set(1, 1, 0.85);
-    rig.spine.add(trim);
+  // ---- DISHDASHAH: the long loose robe the Moslem cat wears ----
+  // Body over the torso (attached to the spine so it leans with the chest),
+  // flared skirt on the hips with an animated hem, starched pleated collar,
+  // front placket with buttons, wide sleeves, emerald trim on every edge.
+  const linen = tex('cloth-linen', () => clothTexture({ seed: 55, weave: 11, thread: 'rgba(122,114,98,0.34)' }));
+  const pleat = tex('pleat', () => pleatTexture({ pleats: 30 }));
+  const dishMat = std(CAT_B.clothWhite, 'cloth', { side: THREE.DoubleSide, bumpScale: 0.05 }, linen);
+  const trimMat = std(CAT_B.emeraldBright, 'cloth', {}, emeraldPair);
+  const body = mesh(new THREE.CylinderGeometry(0.188, 0.212, 0.44, 20, 1, true), dishMat, 0.005, 0.22, 0);
+  rig.spine.add(body);
+  const collar = mesh(new THREE.CylinderGeometry(0.134, 0.156, 0.1, 20, 1, true), std(CAT_B.clothWhite, 'cloth', { side: THREE.DoubleSide }, pleat), 0.01, 0.455, 0);
+  rig.spine.add(collar);
+  const collarBand = mesh(torus(0.157, 0.013), trimMat, 0.01, 0.505, 0);
+  collarBand.rotation.x = Math.PI / 2;
+  rig.spine.add(collarBand);
+  const placket = mesh(box(0.04, 0.36, 0.05), trimMat, 0.178, 0.245, 0);
+  rig.spine.add(placket);
+  for (const yy of [0.13, 0.24, 0.35]) {
+    rig.spine.add(mesh(sphere(0.014, 8, 6), MB.silver, 0.198, yy, 0));
   }
-  const belt = mesh(torus(0.16, 0.018), MB.silver, 0, 0.03, 0);
+  const skirt = mesh(new THREE.CylinderGeometry(0.212, 0.315, 0.54, 24, 1, true), dishMat, 0.005, -0.165, 0);
+  rig.hips.add(skirt);
+  const hem = mesh(torus(0.312, 0.014), trimMat, 0.005, -0.425, 0);
+  hem.rotation.x = Math.PI / 2;
+  rig.hips.add(hem);
+  // belt worn OVER the robe + the crescent moon pin
+  const belt = mesh(torus(0.224, 0.022), MB.silver, 0.005, 0.015, 0);
   belt.rotation.x = Math.PI / 2;
-  belt.scale.set(1.15, 1, 1);
+  belt.scale.set(1, 1, 0.92);
   rig.hips.add(belt);
-  rig.hips.add(mesh(sphere(0.03, 10, 8),
-    std('#EAF2FF', 'goldBright', { emissive: '#BFD4FF', emissiveIntensity: 0.35 }), 0.15, 0.03, 0));
-
-  // sash + ribbon ends
-  const sash = mesh(torus(0.165, 0.024), MB.white, 0, -0.01, 0);
-  sash.rotation.x = Math.PI / 2;
-  sash.rotation.z = 0.5;
-  sash.scale.set(1.12, 1, 1);
-  rig.hips.add(sash);
-  const ribbons = [];
-  for (const sz of [-0.06, 0.05]) {
-    const rib = mesh(new THREE.PlaneGeometry(0.09, 0.34, 2, 4), std(CAT_B.clothWhite, 'cloth', { side: THREE.DoubleSide }, whitePair), -0.14, -0.16, sz);
-    rig.hips.add(rib);
-    ribbons.push(rib);
-  }
-
-  // breeches + cuffs + babouche slippers with curled tips
+  rig.hips.add(mesh(sphere(0.032, 10, 8),
+    std('#EAF2FF', 'goldBright', { emissive: '#BFD4FF', emissiveIntensity: 0.35 }), 0.228, 0.02, 0));
+  // wide sleeves (upper arm + forearm) with emerald cuffs
   for (const side of ['L', 'R']) {
-    const breech = mesh(sphere(0.085, 10, 8), MB.emerald, 0, -0.06, 0);
-    breech.scale.set(0.9, 1.2, 0.9);
-    rig.legs[side].hip.add(breech);
-    rig.legs[side].knee.add(mesh(torus(0.045, 0.012), MB.silver, 0, -0.16, 0));
-    rig.legs[side].knee.add(mesh(box(0.15, 0.05, 0.095), MB.emeraldBright, 0.03, -0.2, 0));
-    const curl = mesh(torus(0.03, 0.014, Math.PI * 1.4), MB.emeraldBright, 0.11, -0.18, 0);
-    curl.rotation.y = Math.PI / 2;
-    rig.legs[side].knee.add(curl);
+    const sleeve = mesh(new THREE.CylinderGeometry(0.082, 0.098, 0.3, 14, 1, true), dishMat, 0, -0.14, 0);
+    rig.arms[side].shoulder.add(sleeve);
+    const cuff = mesh(torus(0.092, 0.014), trimMat, 0, -0.285, 0);
+    cuff.rotation.x = Math.PI / 2;
+    rig.arms[side].shoulder.add(cuff);
+    const fore = mesh(new THREE.CylinderGeometry(0.068, 0.074, 0.17, 12, 1, true), dishMat, 0, -0.09, 0);
+    rig.arms[side].elbow.add(fore);
   }
+  const ribbons = [];
 
   // silver vambrace on the sword forearm
   rig.arms.R.elbow.add(mesh(cyl(0.055, 0.05, 0.11, 10), MB.silver, 0, -0.1, 0));
@@ -496,7 +550,7 @@ export function buildSultanBigotes() {
 
   return {
     ...rig, name: 'SULTAN BIGOTES', side: 'B', facing: 0,
-    sword: scim, swordArm: 'R', ribbons, turban
+    sword: scim, swordArm: 'R', ribbons, turban, dish: { skirt }
   };
 }
 
@@ -647,6 +701,7 @@ export class DuelCat {
       });
     }
     if (d.plume) d.plume.rotation.x = Math.sin(this.time * 3.4) * 0.2;
+    if (d.dish) this._dish(d);
 
     // ---- feet stay ON the rope ----
     // A crouch lowers the hips, and the old code lowered the whole root with
@@ -1012,6 +1067,25 @@ export class DuelCat {
       tg.spineLean = 0.45 + Math.min(f / 0.62, 1) * 0.2;
       tg.crouch = 0.09 + l * 0.03;
     }
+  }
+
+  // dishdashah hem sway: the robe swings from the waist, most at the hem
+  _dish(d) {
+    const geo = d.dish.skirt.geometry;
+    const pos = geo.attributes.position;
+    if (!d.dish.base) d.dish.base = Float32Array.from(pos.array);
+    const base = d.dish.base;
+    const t = this.time;
+    for (let i = 0; i < pos.count; i++) {
+      const bx = base[i * 3], by = base[i * 3 + 1], bz = base[i * 3 + 2];
+      const depth = clamp((0.11 - by) / 0.54, 0, 1);
+      const w = (Math.sin(t * 2.4 + depth * 2.6) * 0.022 + Math.sin(t * 3.9) * 0.008
+        - this.pose.lean * 0.05) * depth * depth;
+      const k = 1 + w * 2.6;
+      pos.setX(i, bx * k);
+      pos.setZ(i, bz * k + w * 0.4);
+    }
+    pos.needsUpdate = true;
   }
 
   // cape vertex sway + flourish (rebuilt from base each frame: never compound)
