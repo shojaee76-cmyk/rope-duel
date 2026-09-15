@@ -37,7 +37,13 @@ export const MATERIALS = {
 };
 
 export const DIM = {
-  spanHalf: 10, ropeY: 3.2, ropeRadius: 0.06, ropeSegments: 16,
-  restSagOne: 0.4, restSagTwo: 0.7, damping: 0.985, swayClamp: 0.35,
+  spanHalf: 10, ropeY: 3.2, ropeRadius: 0.105, ropeSegments: 24,
+  // v5 rope feel: the duel rope is a TAUT working rope, not a bungee. Less sag,
+  // heavy damping (0.985 -> 0.93: energy dies in ~2 swings instead of ringing
+  // for seconds) and a much tighter lateral clamp (0.35 -> 0.12) so paw stamps
+  // and blade hits nudge it instead of slapping it into a wobble.
+  restSagOne: 0.34, restSagTwo: 0.5, damping: 0.93, swayClamp: 0.12,
+  impulseScale: 0.16,      // global multiplier on every injected impulse
+  ropeSmooth: 20,          // 1/s low-pass on the rendered rope points
   poleClearance: 1.5, catHeight: 1.3
 };

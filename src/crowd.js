@@ -95,22 +95,24 @@ export class Crowd {
     this.t = 0;
   }
 
-  update(dt, pressure) {
+  update(dt, pressure, heat = 0) {
     this.t += dt;
     const P = THREE.MathUtils.clamp(pressure || 0, -1, 1);
-    // target energy: gaining side cheers with |P|, losing side sulks
-    const targetBuy = P > 0.08 ? Math.min(1, P * 1.4) : 0;
-    const targetSell = P < -0.08 ? Math.min(1, -P * 1.4) : 0;
+    const H = THREE.MathUtils.clamp(heat || 0, 0, 1);
+    // target energy: gaining side cheers with |P|, losing side sulks. The whole
+    // crowd also gets worked up while the cats are locked in a brawl (H).
+    const targetBuy = P > 0.08 ? Math.min(1, P * 1.4) : H * 0.35;
+    const targetSell = P < -0.08 ? Math.min(1, -P * 1.4) : H * 0.35;
     const k = Math.min(1, dt * 4);
     this.cheer.buy += (targetBuy - this.cheer.buy) * k;
     this.cheer.sell += (targetSell - this.cheer.sell) * k;
     for (const pack of this.packs) {
       const e = this.cheer[pack.side];
       for (const c of pack.cats) {
-        // idle micro-sway always; full hop when cheering
-        const idle = Math.sin(this.t * 1.4 + c.phase) * 0.012;
-        const hopF = e > 0.02 ? Math.abs(Math.sin(this.t * c.speed + c.phase)) : 0;
-        c.m.position.y = c.baseY + idle + hopF * e * 0.34 * c.hop;
+        // idle micro-sway always; full hop when cheering / while a brawl runs
+        const idle = Math.sin(this.t * (1.4 + H * 1.2) + c.phase) * (0.012 + H * 0.02);
+        const hopF = e > 0.02 ? Math.abs(Math.sin(this.t * (c.speed + H * 3) + c.phase)) : 0;
+        c.m.position.y = c.baseY + idle + hopF * e * (0.34 + H * 0.22) * c.hop;
         // slight lean-in while cheering
         c.m.rotation.z = hopF * e * 0.08 * (c.m.position.x > 0 ? -1 : 1);
       }

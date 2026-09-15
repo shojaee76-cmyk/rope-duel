@@ -2,6 +2,11 @@
 // THE ROPE DUEL - scene entry: builds everything, exposes the
 // clean data-module API: setPressure(P in [-1,+1]), setPrice(px).
 // Design: design_spec_cats_arena.md (task t_a1985f86).
+//
+// v5: combat pass. The hooks now resolve every landed attack (blade lock ->
+// clash -> hit reel), impulses on the rope are small nudges instead of slaps,
+// the camera pushes in and shakes on real impacts, and the crowd's energy
+// tracks the live fight heat instead of only the pressure sign.
 // ============================================================
 import * as THREE from '../vendor/three.module.js';
 import { ARENA, DIM } from './palette.js';
@@ -19,21 +24,12 @@ import { setMaxAnisotropy } from './tex.js';
 export function createDuelScene(container, opts = {}) {
   // renderer / scene / camera (spec 1.1)
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  // v3: crisp edges matter much more now that the frame is a close shot of the
-  // duelists; cap at 2x on desktop (vsync-limited anyway) and 1.25x on mobile.
   const desktopQuality = (opts.vfxScale || 1) > 0.5;
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, desktopQuality ? 2 : 1.25));
   renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
-  // v4: shadow map OFF again. It cost ~40% of the frame budget and its
-  // re-render every frame speckled the FLOOR (the only receiver) with crawling
-  // PCF noise, which read as the background "shaking". Grounding is handled by
-  // the stronger moon key + short-throw rims instead.
-  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.enabled = false;   // v4: cost 40% of the frame budget
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.35;
-  // v4: hand max anisotropy to the texture factory BEFORE any texture is
-  // built (the close framing shows the sebka/azulejo/grout patterns at a
-  // shallow angle, where 1x filtering shimmers)
   setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
   container.appendChild(renderer.domElement);
 
@@ -47,26 +43,15 @@ export function createDuelScene(container, opts = {}) {
   camera.position.set(0, 2.55, 6.8);
   camera.lookAt(0, 3.15, 0);
 
-  // lights (spec 5.4) - v3: stronger moon key + rims so the dark cat keeps a
-  // silhouette against the now-open night sky
-  const moonlight = new THREE.DirectionalLight('#BFD4FF', 0.78);
+  // lights (spec 5.4)
+  const moonlight = new THREE.DirectionalLight('#BFD4FF', 0.85);
   moonlight.position.set(0, 14, -8);
-  moonlight.castShadow = true;
-  moonlight.shadow.mapSize.set(1024, 1024);
-  moonlight.shadow.bias = -0.0008;
-  moonlight.shadow.normalBias = 0.02;
-  moonlight.shadow.camera.left = -12;
-  moonlight.shadow.camera.right = 12;
-  moonlight.shadow.camera.top = 8;
-  moonlight.shadow.camera.bottom = -2;
-  moonlight.shadow.camera.far = 40;
+  moonlight.castShadow = false;
   scene.add(moonlight, moonlight.target);
 
   const ambient = new THREE.AmbientLight('#2A2438', 0.55);
   scene.add(ambient);
 
-  // rim lights: v4 keeps their throw SHORT so swinging with the cats does not
-  // pump the illumination of the whole back wall (background shimmer)
   const rimA = new THREE.PointLight('#F5C542', 34, 7, 1.6);
   const rimB = new THREE.PointLight('#7FD48A', 34, 7, 1.6);
   scene.add(rimA, rimB);
@@ -85,8 +70,8 @@ export function createDuelScene(container, opts = {}) {
 
   const catA = new DuelCat('A');
   const catB = new DuelCat('B');
-  catA.x = 1.4;
-  catB.x = -1.4;
+  catA.x = 1.1;
+  catB.x = -1.1;
   scene.add(catA.root, catB.root);
 
   const arena = buildArena(scene);
@@ -97,12 +82,12 @@ export function createDuelScene(container, opts = {}) {
   // ---- v2 ambience: richer sky + living courtyard ----
   const amb = {
     vfxScale: opts.vfxScale || 1,
-    mouse: { x: 0, y: 0 },       // -1..1, eased toward target
-    mouseT: { x: 0, y: 0 },      // raw target
-    moonPulse: 0,                // 0..1 decayed excitation, drives sky events
+    mouse: { x: 0, y: 0 },
+    mouseT: { x: 0, y: 0 },
+    moonPulse: 0,
     shoot: null, clouds: null, stars: null, fireflies: null, water: null, embers: null,
   };
-  buildSkyDome(scene);           // replaces the old flat-ramp dome (added on top; v1 dome removed below)
+  buildSkyDome(scene);
   amb.stars = buildStars(scene);
   if (amb.vfxScale > 0.3) {
     amb.clouds = buildClouds(scene);
@@ -112,7 +97,6 @@ export function createDuelScene(container, opts = {}) {
     amb.embers = buildEmberDrift(scene, amb.vfxScale);
   }
   buildSkyline(scene);
-  // mouse parallax: pointer over the page (not just the canvas)
   function onMouse(e) {
     const w = container.clientWidth || innerWidth, h = container.clientHeight || innerHeight;
     amb.mouseT.x = ((e.clientX ?? w / 2) / w) * 2 - 1;
@@ -120,66 +104,87 @@ export function createDuelScene(container, opts = {}) {
   }
   window.addEventListener('pointermove', onMouse, { passive: true });
 
-  // event hooks: VFX + screen shake (spec 7.3 VFX column, 7.4)
+  // ---- combat hooks: VFX + rope nudges + camera shake ----
   const shake = { t: 0, amp: 0 };
   let slowmo = 0;
-  let camPan = 0;         // low-pass filtered fighter midpoint (v4: no snapping)
+  let camPan = 0;
+  let camPush = 0;      // smoothed brawl push-in
+  let heat = 0;         // 0..1 fight heat (drives crowd + camera energy)
   function clampFoe(x) {
     const lim = DIM.spanHalf - DIM.poleClearance;
     return THREE.MathUtils.clamp(x, -lim, lim);
   }
-  function opponentOf(cat) { return cat === catA ? 'B' : 'A'; }
+  const sideOf = (cat) => cat.data.side;
+  const foeOf = (cat) => (sideOf(cat) === 'A' ? catB : catA);
+  const fwOf = (cat) => (sideOf(cat) === 'A' ? -1 : 1);   // world-x toward the foe
   function gap(a, b) { return Math.abs(a.x - b.x); }
+  function kick(dur, amp) { shake.t = Math.max(shake.t, dur); shake.amp = Math.max(shake.amp, amp); }
+
+  // one place that resolves "this attack connected"
+  function landAttack(cat, heavy) {
+    const side = sideOf(cat), foe = foeOf(cat), fw = fwOf(cat);
+    const dir = -fw;                       // world-x the foe is driven back
+    vfx.lungeSparks(cat.bladeMidWorld());
+    if (gap(cat, foe) < 1.75) {
+      if (director.tryClash(side)) return;
+      if (gap(cat, foe) < 1.65) {
+        foe.x = clampFoe(foe.x + dir * (heavy ? 0.5 : 0.3));
+        director.resolveHit(side, dir);
+        vfx.dustBurst({ x: foe.x, y: rope.yAt(foe.x), z: 0 });
+        kick(heavy ? 0.12 : 0.07, heavy ? 0.11 : 0.06);
+        if (heavy) slowmo = Math.max(slowmo, 0.08);
+      }
+    }
+    rope.injectImpulse(cat.x, 0, -0.7, 0);
+  }
 
   const hooks = {
     onStamp(cat) {
-      rope.injectImpulse(cat.x, 0, -0.5, 0);
+      rope.injectImpulse(cat.x, 0, -0.9, 0);
       vfx.dustBurst({ x: cat.x, y: rope.yAt(cat.x), z: 0 });
     },
-    onLungeHit(cat) {
-      vfx.lungeSparks(cat.bladeTipWorld());
-      if (director.tryClash(opponentOf(cat))) return;
-      const foe = opponentOf(cat) === 'A' ? catA : catB;
-      const dir = cat === catA ? 1 : -1;
-      if (gap(cat, foe) < 1.7) {
-        foe.x = clampFoe(foe.x + dir * 0.5);
-        rope.injectImpulse(foe.x, 0, -0.6, 0);
-        shake.t = 0.08;
-        shake.amp = 0.07;
-        foe.setState('STUMBLE', 0.6, { dir: -dir, dist: 0.4 });
-      }
-      rope.injectImpulse(cat.x, 0, -0.5, 0);
-    },
+    onLungeHit(cat) { landAttack(cat, false); },
     onSlash(cat, kind) {
       const tip = cat.bladeTipWorld();
-      if (cat === catA) {
+      if (sideOf(cat) === 'A') {
         vfx.emberBurst(tip);
-        if (kind === 'up') slowmo = 0.3;
+        if (kind === 'up') slowmo = Math.max(slowmo, 0.22);
       } else {
         vfx.ghost(tip);
         vfx.ghostTile(tip);
       }
-      if (kind === 'crescent' || kind === 'down') {
-        const foe = cat === catA ? catB : catA;
-        const dir = cat === catA ? -1 : 1;
-        if (gap(cat, foe) < 2.0) {
-          foe.x = clampFoe(foe.x + dir * 0.6);
-          vfx.dustBurst({ x: foe.x, y: rope.yAt(foe.x), z: 0 });
-        }
-      }
-      rope.injectImpulse(cat.x, 0, -0.5, 0);
+      if (kind === 'crescent' || kind === 'down') landAttack(cat, true);
+      rope.injectImpulse(cat.x, 0, -0.7, 0);
     },
     onWhoosh(cat) { vfx.ghost(cat.bladeTipWorld()); },
     onTaunt(cat) { vfx.lungeSparks(cat.bladeTipWorld()); },
-    onTumble(cat) { vfx.dustBurst({ x: cat.x, y: rope.yAt(cat.x), z: 0 }); }
+    onTumble(cat) { vfx.dustBurst({ x: cat.x, y: rope.yAt(cat.x), z: 0 }); },
+    onHitImpact(cat) {
+      vfx.dustBurst({ x: cat.x, y: rope.yAt(cat.x), z: 0 });
+      vfx.furTuft({ x: cat.x, y: cat.root.position.y + 0.5, z: 0.1 });
+      kick(0.08, 0.05);
+    },
+    onKnockback(cat, dir) {
+      cat.x = clampFoe(cat.x + dir * 0.4);
+      rope.injectImpulse(cat.x, 0, -1.1, 0);
+      vfx.dustBurst({ x: cat.x, y: rope.yAt(cat.x), z: 0 });
+    },
+    onLockSparks(cat) {
+      const p = cat.bladeMidWorld();
+      vfx.clashBurst(p);
+      kick(0.09, 0.06);
+    }
   };
-  const ctx = { rope, flagDart: false, pressureWobble: 0, ...hooks };
+  const ctx = { rope, flagDart: false, pressureWobble: 0, circlePhase: 0, ...hooks };
 
   director.onClash = () => {
-    vfx.clashBurst(catA.bladeTipWorld());
-    shake.t = 0.1;
-    shake.amp = 0.1;
-    amb.moonPulse = 1; // the sky itself reacts to blades meeting
+    const p = catA.bladeMidWorld().lerp(catB.bladeMidWorld(), 0.5);
+    vfx.clashBurst(p);
+    vfx.clashBurst(p);
+    kick(0.16, 0.13);
+    slowmo = Math.max(slowmo, 0.12);   // hit-stop: the beat lands
+    amb.moonPulse = 1;
+    heat = Math.min(1, heat + 0.5);
   };
 
   // demo pressure source (used until a live feed drives the API)
@@ -187,18 +192,13 @@ export function createDuelScene(container, opts = {}) {
   let lastPrice = 67000;
   let raf = 0;
   let running = true;
-  let pressureWobbleTarget = 0; // smooth tilt driven by setPressure (integration)
-  const hooksTrade = [];        // trade callout listeners (integration)
-
-  // debug/integration handle (used by tests and the root webpage task)
-  if (opts.debug) {
-    window.__duelDebug = { rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd };
-  }
+  let pressureWobbleTarget = 0;
+  const hooksTrade = [];
 
   const api = {
     setPressure(P) {
       demo.on = false;
-      pressureWobbleTarget = THREE.MathUtils.clamp(P, -1, 1) * 0.14; // comic tilt wobble
+      pressureWobbleTarget = THREE.MathUtils.clamp(P, -1, 1) * 0.16;
       director.setPressure(P);
     },
     setPrice(px) {
@@ -211,13 +211,10 @@ export function createDuelScene(container, opts = {}) {
       director.setPrice(px);
       flag.setChange24h(THREE.MathUtils.clamp(director.trendM() * 8, -99, 99));
     },
-    // real 24h change from the feed takes precedence over the trend estimate
     setChange24hText(text) { flag.setChange24hText(text); },
-    // big-trade callout hook (integration card): page passes a DOM callback
     onTradeCallout(cb) { hooksTrade.push(cb); return () => { const i = hooksTrade.indexOf(cb); if (i >= 0) hooksTrade.splice(i, 1); }; },
-    // adapter/page pushes qualifying big trades here; scene fans out to listeners
     tradeCallout(info) {
-      if (info && info.notional >= 250000) amb.moonPulse = 1;          // whale: sky flare + shooting star
+      if (info && info.notional >= 250000) { amb.moonPulse = 1; heat = Math.min(1, heat + 0.35); }
       else if (info && info.notional >= 100000) amb.moonPulse = Math.max(amb.moonPulse, 0.6);
       for (let i = 0; i < hooksTrade.length; i++) {
         try { hooksTrade[i](info); } catch (e) { /* a bad listener never kills the loop */ }
@@ -235,7 +232,6 @@ export function createDuelScene(container, opts = {}) {
     }
   };
 
-  // resize
   function resize() {
     const w = container.clientWidth || 1280, h = container.clientHeight || 720;
     camera.aspect = w / h;
@@ -260,7 +256,7 @@ export function createDuelScene(container, opts = {}) {
     let dt = rawDt;
     if (slowmo > 0) {
       slowmo -= rawDt;
-      dt = rawDt * 0.35; // Matador Moonrise slow-mo (spec 7.3 move 2)
+      dt = rawDt * 0.35; // impact hit-stop
     }
     simTime += dt;
     frameCount++;
@@ -268,7 +264,7 @@ export function createDuelScene(container, opts = {}) {
     // demo pressure/price when no live feed is driving the API
     if (demo.on) {
       demo.t += dt;
-      const P = Math.sin(demo.t * 0.4) * 0.8 + Math.sin(demo.t * 0.13) * 0.35;
+      const P = Math.sin(demo.t * 0.4) * 0.8 + Math.sin(demo.t * 0.13) * 0.35 + Math.sin(demo.t * 1.7) * 0.12;
       director.setPressure(P);
       if (frameCount % 30 === 0) {
         const drift = (Math.sin(demo.t * 0.05) + Math.sin(demo.t * 0.021 + 2)) * 30;
@@ -282,7 +278,7 @@ export function createDuelScene(container, opts = {}) {
 
     // physics + director + cats
     ctx.flagDart = false;
-    // ease the tilt wobble toward the target so pressure changes read as lean-in
+    ctx.circlePhase = director.circlePhase;
     ctx.pressureWobble += (pressureWobbleTarget - ctx.pressureWobble) * Math.min(1, dt * 5);
     rope.clearLoads();
     rope.setLoad(catA.x + catA.pose.xOff, 1.0);
@@ -291,9 +287,22 @@ export function createDuelScene(container, opts = {}) {
     director.update(dt);
     catA.update(dt, ctx);
     catB.update(dt, ctx);
-    rope.updateVisual(frameCount);
+    rope.updateVisual();
 
     flag.update(dt, rope);
+
+    // fight heat: rises while the cats are locked in, decays otherwise
+    const brawling = catA.state.name === 'BLADE_LOCK' || catA.state.name === 'CLASH' ||
+                     catB.state.name === 'BLADE_LOCK' || catB.state.name === 'CLASH';
+    heat = Math.max(0, heat - dt * 0.55);
+    if (brawling) heat = Math.min(1, heat + dt * 1.2);
+
+    // blade lock: a steady shower of sparks at the crossing blades
+    if (brawling && frameCount % 3 === 0) {
+      const p = catA.bladeMidWorld().lerp(catB.bladeMidWorld(), 0.5);
+      vfx.clashBurst(p);
+      vfx.emberBurst(p);
+    }
 
     // rim lights follow the cats (spec 5.4)
     rimA.position.set(catA.x + 1.5, 2.6, -1.3);
@@ -310,15 +319,13 @@ export function createDuelScene(container, opts = {}) {
       }
     }
 
-    // torch flicker (spec 5.4)
     updateArena(arena, simTime);
 
     vfx.update(dt);
-    crowd.update(dt, director.pressure);
+    crowd.update(dt, director.pressure, heat);
 
     // ---- v2 ambience update ----
     amb.moonPulse = Math.max(0, amb.moonPulse - dt * 0.55);
-    // dead-zone + slower easing: only real pointer movement sways the camera
     const dz = (v) => (Math.abs(v) < 0.07 ? 0 : (v - Math.sign(v) * 0.07) / 0.93);
     amb.mouse.x += (dz(amb.mouseT.x) - amb.mouse.x) * Math.min(1, dt * 1.8);
     amb.mouse.y += (dz(amb.mouseT.y) - amb.mouse.y) * Math.min(1, dt * 1.8);
@@ -337,22 +344,22 @@ export function createDuelScene(container, opts = {}) {
       moon.scale.setScalar(1 + amb.moonPulse * 0.06);
     }
 
-    // camera: CLOSE shot on the cats + gentle drift + shake + mouse parallax.
-    // v4: the fighter-follow pan is now heavily low-passed (a stumble used to
-    // teleport a cat 0.5 units and snap the whole background with it), the
-    // parallax has a dead zone so tiny pointer moves can't jitter the frame,
-    // and the idle drift is gentler.
+    // camera: close on the cats, follows the PAIR (not one cat), pushes in
+    // during a brawl and kicks on impacts. v4 low-pass + dead zone retained.
     const shk = Math.max(shake.t, 0);
     if (shk > 0) shake.t -= rawDt;
-    const s = (shk / 0.1) * shake.amp;
-    camPan += ((catA.x + catB.x) * 0.3 - camPan) * Math.min(1, dt * 1.4);
-    const mz = (v) => (Math.abs(v) < 0.07 ? 0 : (v - Math.sign(v) * 0.07) / 0.93);
+    else shake.amp = 0;
+    const s = (shk / 0.16) * shake.amp;
+    const centre = (catA.x + catB.x) * 0.5;
+    camPan += (centre - camPan) * Math.min(1, dt * 3.2);
+    camPush += ((brawling ? 1 : 0) - camPush) * Math.min(1, dt * 2.6);
+    const idleDriftX = Math.sin(simTime * 0.09) * 0.18;
     camera.position.set(
-      camPan + Math.sin(simTime * 0.09) * 0.18 + (Math.random() - 0.5) * s + amb.mouse.x * 0.5,
-      2.55 + Math.sin(simTime * 0.06) * 0.1 + (Math.random() - 0.5) * s - amb.mouse.y * 0.3,
-      6.8
+      camPan + idleDriftX + (Math.random() - 0.5) * s + amb.mouse.x * 0.5,
+      2.55 + Math.sin(simTime * 0.06) * 0.1 + (Math.random() - 0.5) * s - amb.mouse.y * 0.3 + camPush * 0.16,
+      6.8 - camPush * 0.55
     );
-    camera.lookAt(camPan * 0.85, 3.15, 0);
+    camera.lookAt(camPan * 0.9, 3.15 - camPush * 0.1, 0);
 
     renderer.render(scene, camera);
   }
@@ -360,7 +367,7 @@ export function createDuelScene(container, opts = {}) {
 
   // debug/integration handle (used by tests and the root webpage task)
   if (opts.debug) {
-    window.__duelDebug = { rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade };
+    window.__duelDebug = { rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, heat: () => heat };
   }
 
   return api;

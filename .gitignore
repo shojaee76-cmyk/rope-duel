@@ -7,3 +7,6 @@ stab*.png
 smoke_v2.png
 _*.png
 live_shot.png
+tools/shots/
+tools/*.json
+*.eyes.jpg

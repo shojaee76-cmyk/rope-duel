@@ -1,11 +1,28 @@
-// The Courtyard of Two Arches: five-bay arcade, azulejo dado, ataurique frieze,
-// tiled floor with the duel medallion, dry fountain, BTC moon, torches (spec 5).
+// The Courtyard of the Two Poles: tiled floor with the duel medallion, dry
+// fountain, BTC moon, torches, moonlit parapet (spec 5).
+//
+// v5: the five giant round arch hoops are GONE (user: "the circles on the
+// background are laggy and ugly, you can delete it"). They cost ~110 draw calls
+// (5 tori + ~90 voussoir blocks + 4 vista planes) and read as cheap striped
+// rings. The back wall is now a clean open parapet: piers, coping, merlons,
+// azulejo dado and the ataurique frieze, with the BTC moon free in the sky and
+// the sierra on the horizon. Every surface got a real texture + bump map, and
+// the floor medallion is a single decal under the rope instead of one medallion
+// per tile (the old repeat.set(3,2) stamped SIX of them across the courtyard).
 import * as THREE from '../vendor/three.module.js';
 import { ARENA, MATERIALS, DIM } from './palette.js';
-import { canvasTexture } from './tex.js';
+import { canvasTexture, stoneTexture, stoneCanvas, bumpFrom } from './tex.js';
 
 const std = (color, kind = 'cloth', extra = {}) =>
   new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
+const texed = (color, kind, pair, extra = {}) => {
+  const m = new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
+  if (pair) {
+    m.map = pair.map;
+    if (pair.bump) { m.bumpMap = pair.bump; m.bumpScale = extra.bumpScale ?? 0.06; }
+  }
+  return m;
+};
 const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
@@ -39,8 +56,6 @@ function azulejoTexture() {
       g.restore();
     }
   };
-  // v4: soften the star edges - the dado is the finest pattern in the scene
-  // and its hard edges crawled as the camera moved
   if (soft) g.filter = 'blur(0.35px)';
   const colorways = [['#1F5FA8', '#F2EFE9'], ['#12755F', '#F2EFE9']];
   star(32, 32, 62, ...colorways[0]);
@@ -48,31 +63,14 @@ function azulejoTexture() {
   star(96, 32, 62, ...colorways[1]);
   star(32, 96, 62, ...colorways[1]);
   if (soft) g.filter = 'none';
-  return canvasTexture(c);
-}
-
-// warm sandstone with sebka-style relief lines (spec 5.2)
-function wallTexture() {
-  const c = document.createElement('canvas');
-  c.width = 256; c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = ARENA.stoneWall;
-  g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = 'rgba(112,84,58,0.8)';   // v4: softer relief lines (less crawl)
-  g.lineWidth = 2;
-  // sebka: interlacing diamond grid
-  for (let row = 0; row < 8; row++) {
-    for (let col = 0; col < 8; col++) {
-      const x = col * 32 + (row % 2 ? 16 : 0);
-      const y = row * 32;
-      g.beginPath();
-      g.moveTo(x, y + 16);
-      g.lineTo(x + 16, y);
-      g.lineTo(x + 32, y + 16);
-      g.lineTo(x + 16, y + 32);
-      g.closePath();
-      g.stroke();
-    }
+  // v5: mortar joints + a little glaze variation so the tiles read as ceramics
+  const rnd = (() => { let v = 77; return () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; }; })();
+  g.strokeStyle = 'rgba(60,52,40,0.35)';
+  g.lineWidth = 3;
+  g.strokeRect(1.5, 1.5, 125, 125);
+  for (let i = 0; i < 120; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+    g.fillRect(rnd() * 128, rnd() * 128, 3, 3);
   }
   return canvasTexture(c);
 }
@@ -88,11 +86,9 @@ function friezeTexture() {
   g.lineWidth = 3;
   for (let x = 0; x < 512; x += 64) {
     g.beginPath();
-    // S-scroll stem
     g.moveTo(x, 32);
     g.bezierCurveTo(x + 12, 10, x + 28, 10, x + 32, 32);
     g.bezierCurveTo(x + 36, 54, x + 52, 54, x + 64, 32);
-    // leaf blooms
     for (const [lx, ly, r] of [[x + 20, 20, 7], [x + 44, 46, 7], [x + 32, 32, 9]]) {
       g.moveTo(lx + r, ly);
       g.arc(lx, ly, r, 0, Math.PI * 2);
@@ -102,63 +98,118 @@ function friezeTexture() {
   return canvasTexture(c);
 }
 
-// floor paving with grout + the central duel medallion painted separately
-function floorTexture(medallion) {
+// paving: paver courses + grout (no medallion - that is a separate decal now)
+function floorTexture() {
   const c = document.createElement('canvas');
   c.width = 512; c.height = 512;
   const g = c.getContext('2d');
-  const soft = 'filter' in g;
   g.fillStyle = ARENA.floorBase;
   g.fillRect(0, 0, 512, 512);
-  // v4: SOFTER but still defined grout. Hard 3px dark-on-cream lines at a
-  // grazing angle were the classic pixel-crawl source; this keeps the grid
-  // readable without the shimmer.
+  // soft grain before the joints
+  const rnd = (() => { let v = 913; return () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; }; })();
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(96,78,56,0.08)';
+    g.fillRect(rnd() * 512, rnd() * 512, 2 + rnd() * 3, 2 + rnd() * 3);
+  }
   g.strokeStyle = 'rgba(104,86,62,0.66)';
   g.lineWidth = 2.5;
   for (let i = 0; i <= 512; i += 64) {
     g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 512); g.stroke();
     g.beginPath(); g.moveTo(0, i); g.lineTo(512, i); g.stroke();
   }
-  if (medallion) {
-    // eight-point star split half gold / half emerald at canvas center
-    const cx = 256, cy = 256, R = 120;
-    if (soft) g.filter = 'blur(0.45px)';
-    const star = (rot, fill) => {
-      g.fillStyle = fill;
-      g.beginPath();
-      for (let i = 0; i < 8; i++) {
-        const a1 = rot + (i / 8) * Math.PI * 2;
-        const a2 = a1 + Math.PI / 8;
-        g.lineTo(cx + Math.cos(a1) * R, cy + Math.sin(a1) * R);
-        g.lineTo(cx + Math.cos(a2) * R * 0.45, cy + Math.sin(a2) * R * 0.45);
-      }
-      g.closePath();
-      g.fill();
-    };
-    star(-Math.PI / 2, '#D4A017');   // right half gold
-    star(Math.PI / 2, '#0F5D4E');    // left half emerald
-    g.strokeStyle = 'rgba(110,90,66,0.75)';
-    g.lineWidth = 5;
-    g.beginPath(); g.arc(cx, cy, R + 14, 0, Math.PI * 2); g.stroke();
-    if (soft) g.filter = 'none';
+  // alternating paver tone (subtle checker, reads as laid stone not lino)
+  for (let r = 0; r < 8; r++) {
+    for (let cIdx = 0; cIdx < 8; cIdx++) {
+      if ((r + cIdx) % 2) continue;
+      g.fillStyle = 'rgba(255,246,226,0.05)';
+      g.fillRect(cIdx * 64, r * 64, 64, 64);
+    }
   }
+  return canvasTexture(c);
+}
+
+// the duel medallion: ONE eight-point star split gold / emerald, transparent
+// background so it can be laid over the paving as a decal
+function medallionTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const soft = 'filter' in g;
+  const cx = 256, cy = 256, R = 150;
+  if (soft) g.filter = 'blur(0.5px)';
+  // stone ring
+  g.strokeStyle = 'rgba(110,90,66,0.85)';
+  g.lineWidth = 14;
+  g.beginPath(); g.arc(cx, cy, R + 34, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = 'rgba(240,232,214,0.5)';
+  g.lineWidth = 4;
+  g.beginPath(); g.arc(cx, cy, R + 42, 0, Math.PI * 2); g.stroke();
+  const star = (rot, fill) => {
+    g.fillStyle = fill;
+    g.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a1 = rot + (i / 8) * Math.PI * 2;
+      const a2 = a1 + Math.PI / 8;
+      g.lineTo(cx + Math.cos(a1) * R, cy + Math.sin(a1) * R);
+      g.lineTo(cx + Math.cos(a2) * R * 0.45, cy + Math.sin(a2) * R * 0.45);
+    }
+    g.closePath();
+    g.fill();
+  };
+  star(-Math.PI / 2, '#D4A017');
+  star(Math.PI / 2, '#0F5D4E');
+  if (soft) g.filter = 'none';
+  // gold outlines + centre boss
+  g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(60,46,30,0.55)';
+  g.lineWidth = 3;
+  for (const rot of [-Math.PI / 2, Math.PI / 2]) {
+    g.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a1 = rot + (i / 8) * Math.PI * 2;
+      const a2 = a1 + Math.PI / 8;
+      g.lineTo(cx + Math.cos(a1) * R, cy + Math.sin(a1) * R);
+      g.lineTo(cx + Math.cos(a2) * R * 0.45, cy + Math.sin(a2) * R * 0.45);
+    }
+    g.closePath();
+    g.stroke();
+  }
+  g.fillStyle = 'rgba(236,228,210,0.9)';
+  g.beginPath(); g.arc(cx, cy, 22, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(120,96,64,0.8)';
+  g.lineWidth = 6;
+  g.beginPath(); g.arc(cx, cy, 22, 0, Math.PI * 2); g.stroke();
   return canvasTexture(c);
 }
 
 // BTC moon: emissive disc with engraved emblem + halo (spec 5.3)
 function moonTexture() {
   const c = document.createElement('canvas');
-  c.width = 512; c.height = 512;
+  c.width = c.height = 512;
   const g = c.getContext('2d');
   g.clearRect(0, 0, 512, 512);
-  // halo
   const grad = g.createRadialGradient(256, 256, 150, 256, 256, 256);
   grad.addColorStop(0, ARENA.moonHalo + 'cc');
   grad.addColorStop(1, ARENA.moonHalo + '00');
   g.fillStyle = grad;
   g.fillRect(0, 0, 512, 512);
-  // disc
+  // moon craters: barely-there grey mottling so the disc is not a flat sticker
+  const rnd = (() => { let v = 553; return () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; }; })();
   g.fillStyle = ARENA.moonBtc;
+  g.beginPath(); g.arc(256, 256, 190, 0, Math.PI * 2); g.fill();
+  for (let i = 0; i < 40; i++) {
+    const a = rnd() * Math.PI * 2, r = rnd() * 175;
+    const x = 256 + Math.cos(a) * r, y = 256 + Math.sin(a) * r;
+    const rr = 6 + rnd() * 26;
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,214,150,0.16)' : 'rgba(150,80,10,0.14)';
+    g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.fill();
+  }
+  // terminator shading: the moon is lit from the upper left, not uniformly
+  const sh = g.createRadialGradient(190, 180, 40, 256, 256, 230);
+  sh.addColorStop(0, 'rgba(255,240,214,0.30)');
+  sh.addColorStop(0.55, 'rgba(255,255,255,0)');
+  sh.addColorStop(1, 'rgba(70,30,0,0.34)');
+  g.fillStyle = sh;
   g.beginPath(); g.arc(256, 256, 190, 0, Math.PI * 2); g.fill();
   // engraved Bitcoin B with two strokes
   g.strokeStyle = ARENA.moonSymbol;
@@ -175,93 +226,6 @@ function moonTexture() {
     g.moveTo(dx, 130); g.lineTo(dx, 382);
     g.stroke();
   }
-  return canvasTexture(c);
-}
-
-// vista seen THROUGH the arch openings (v3): distant whitewashed village with
-// glowing windows on a moonlit horizon, masked to the EXACT arch shape so no
-// panel corners float against the open sky. Plane width = 2*rIn, height =
-// rIn + under (the `under` strip sits behind the parapet, never visible).
-function vistaTexture(seed, rIn) {
-  const under = 0.42;
-  const W = 384;
-  const H = Math.max(72, Math.round(W * (rIn + under) / (2 * rIn)));
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const g = c.getContext('2d');
-  let v = seed;
-  const rnd = () => { v = (v * 16807) % 2147483647; return (v % 1000) / 1000; };
-  const springRow = (rIn / (rIn + under)) * H;   // world y=0 (arch springline)
-  // sky above the horizon (warmer than the main sky: the opening glows)
-  const grad = g.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#0E1430');
-  grad.addColorStop(0.62, '#1B1740');
-  grad.addColorStop(0.88, '#40273C');
-  grad.addColorStop(1, '#7A4526');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, W, H);
-  // stars
-  for (let i = 0; i < 60; i++) {
-    const x = rnd() * W, y = rnd() * springRow * 0.9;
-    g.fillStyle = `rgba(220,226,255,${0.4 + rnd() * 0.6})`;
-    const s = rnd() < 0.15 ? 2.5 : 1.5;
-    g.fillRect(x, y, s, s);
-  }
-  // sierra ridge sitting on the horizon
-  g.fillStyle = '#251E3C';
-  g.beginPath();
-  g.moveTo(0, springRow);
-  let y = springRow - 14;
-  for (let x = 0; x <= W; x += 22) {
-    y += (rnd() - 0.5) * 13;
-    y = Math.max(springRow - 30, Math.min(springRow - 4, y));
-    g.lineTo(x, y);
-  }
-  g.lineTo(W, springRow);
-  g.closePath();
-  g.fill();
-  // village: big whitewashed cubes, glowing windows (must read at ~100 px)
-  for (let x = 6; x < W - 20;) {
-    const w = 26 + rnd() * 30, h = 18 + rnd() * 26, top = springRow - h;
-    g.fillStyle = '#2E2743';
-    g.fillRect(x, top, w, h + 6);
-    g.fillStyle = '#1E1832';
-    g.fillRect(x - 2, top - 3, w + 4, 4);
-    const n = 1 + Math.floor(rnd() * 2);
-    for (let k = 0; k < n; k++) {
-      const wx = x + 5 + rnd() * (w - 14), wy = top + 6 + rnd() * Math.max(4, h - 14);
-      g.fillStyle = 'rgba(255,178,88,0.45)';
-      g.fillRect(wx - 5, wy - 5, 14, 14);
-      g.fillStyle = rnd() < 0.7 ? 'rgba(255,206,132,1)' : 'rgba(255,238,190,0.9)';
-      g.fillRect(wx, wy, 5, 7);
-    }
-    x += w + 6 + rnd() * 12;
-  }
-  // cypress silhouettes
-  for (const cx of [18 + rnd() * 20, W - 40 + rnd() * 18]) {
-    g.fillStyle = '#111324';
-    g.beginPath();
-    g.moveTo(cx, springRow + 6);
-    g.quadraticCurveTo(cx - 8, springRow - 26, cx, springRow - 46 - rnd() * 10);
-    g.quadraticCurveTo(cx + 8, springRow - 26, cx, springRow + 6);
-    g.fill();
-  }
-  // warm haze hugging the horizon
-  const hz = g.createLinearGradient(0, springRow - 26, 0, springRow + 20);
-  hz.addColorStop(0, 'rgba(150,88,45,0)');
-  hz.addColorStop(1, 'rgba(170,100,50,0.45)');
-  g.fillStyle = hz;
-  g.fillRect(0, springRow - 26, W, 46);
-  // ---- mask to the arch opening: half-disc above the springline + rect below
-  g.globalCompositeOperation = 'destination-in';
-  g.beginPath();
-  g.moveTo(0, H);
-  g.lineTo(0, springRow);
-  g.arc(W / 2, springRow, W / 2, Math.PI, 0, false);
-  g.lineTo(W, H);
-  g.closePath();
-  g.fill();
-  g.globalCompositeOperation = 'source-over';
   return canvasTexture(c);
 }
 
@@ -289,36 +253,37 @@ export function buildArena(scene) {
   arena.userData.torches = groups.torches;
   arena.userData.coins = () => groups.coins;
 
-  // NOTE (v2): sky dome, stars and moon-halo live in src/skydome.js now;
-  // the BTC moon mesh stays here, framed by the center arch (money shot).
-  // ---- BTC moon framed by the giant center horseshoe arch ----
+  // ---- BTC moon, now free in the open sky ----
   const moon = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.6, 4.6),
+    new THREE.PlaneGeometry(5.0, 5.0),
     new THREE.MeshBasicMaterial({ map: moonTexture(), transparent: true, fog: false, depthWrite: false })
   );
-  moon.position.set(0, 6.35, -7.45);
+  moon.position.set(0, 6.6, -7.45);
   moon.renderOrder = -1;
   arena.add(moon);
   groups.moon = moon;
   arena.userData.moon = moon;
 
-  // ---- back wall with five-bay arcade at z = -7 ----
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture(), roughness: 0.95 });
-  wallMat.map.repeat.set(4, 1.5);
+  // ---- back wall: open parapet at the arch springline (z = -7.2) ----
+  const wallPair = stoneTexture({ seed: 61, base: '#ffffff', blocks: 5, alpha: 0.16, repeatX: 4, repeatY: 2 });
   const wallH = 8, wallW = 26, wallZ = -7.2;
-  // solid wall below the arches
   const dadoH = 1.2, friezeH = 0.4, arcSpringY = 3.4;
+  const wallMat = texed(ARENA.stoneWall, 'cloth', wallPair, { roughness: 0.95, bumpScale: 0.12 });
   const lowerWall = mesh(new THREE.BoxGeometry(wallW, arcSpringY, 0.5), wallMat, 0, arcSpringY / 2, wallZ);
   arena.add(lowerWall);
+
   // dado band (azulejo)
   const azTex = azulejoTexture();
   azTex.repeat.set(10, 1);
+  const azBump = bumpFrom(azTex.image, 1.0);
+  azBump.repeat.copy(azTex.repeat);
   const dado = mesh(
     new THREE.BoxGeometry(wallW, dadoH, 0.54),
-    new THREE.MeshStandardMaterial({ map: azTex, roughness: 0.55 }),
+    new THREE.MeshStandardMaterial({ map: azTex, bumpMap: azBump, bumpScale: 0.05, roughness: 0.5 }),
     0, dadoH / 2, wallZ + 0.01
   );
   arena.add(dado);
+
   // frieze band above dado
   const frTex = friezeTexture();
   frTex.repeat.set(6, 1);
@@ -328,106 +293,53 @@ export function buildArena(scene) {
     0, dadoH + friezeH / 2, wallZ + 0.01
   );
   arena.add(frieze);
-  // ---- v3: OPEN ARCADE against the night sky ----
-  // The old solid upper wall (y 5.4..8) + tall crenellations blocked almost
-  // the whole sky. The wall is now a low parapet at the arch springline, so
-  // the five arches stand against the stars and the BTC moon hangs free.
-  const copingMat = std(ARENA.stoneShadow, 'cloth');
+
+  // coping + engaged piers + merlons: this is what carries the wall now that
+  // the arch hoops are gone, so it gets real stone texture too
+  const stonePair = stoneTexture({ seed: 62, base: '#ffffff', blocks: 3, alpha: 0.2, repeatX: 2, repeatY: 1 });
+  const copingMat = texed(ARENA.stoneShadow, 'cloth', stonePair, { bumpScale: 0.08 });
   const coping = mesh(new THREE.BoxGeometry(wallW, 0.16, 0.62), copingMat, 0, arcSpringY + 0.08, wallZ + 0.02);
   arena.add(coping);
-  // engaged piers on the wall face at every point where two arch legs land:
-  // this is what makes the low parapet read as a real arcade instead of
-  // hoops floating in the sky (v3)
-  const pierMat = std(ARENA.stoneShadow, 'cloth');
-  for (const px of [-12.1, -7.4, -3.3, 3.3, 7.4, 12.1]) {
+  const pierMat = texed(ARENA.stoneShadow, 'cloth', stonePair, { bumpScale: 0.1 });
+  const piersX = [-12.1, -7.4, -3.3, 3.3, 7.4, 12.1];
+  for (const px of piersX) {
     arena.add(mesh(new THREE.BoxGeometry(1.0, 3.35, 0.68), pierMat, px, 1.675, wallZ + 0.09));
-    // impost/capital block where the thin arch fans out (also the merlon base)
-    arena.add(mesh(new THREE.BoxGeometry(1.2, 0.22, 0.76), std(ARENA.stoneWall, 'cloth'), px, 3.46, wallZ + 0.09));
+    arena.add(mesh(new THREE.BoxGeometry(1.2, 0.22, 0.76), texed(ARENA.stoneWall, 'cloth', stonePair), px, 3.46, wallZ + 0.09));
   }
-  // merlons: square (Christian) alternating with stepped (Moorish), placed
-  // only on the pier tops BETWEEN the arches so they never clash with a ring
-  const merlonMat = std(ARENA.stoneWall, 'cloth');
+  const merlonMat = texed(ARENA.stoneWall, 'cloth', stonePair, { bumpScale: 0.1 });
   for (const x of [-12, -7.4, -3.3, 3.3, 7.4, 12]) {
     const stepped = Math.abs(x) > 9 || Math.abs(x) < 5;
-    const m = mesh(new THREE.BoxGeometry(0.9, 0.42, 0.5), merlonMat, x, arcSpringY + 0.37, wallZ);
-    arena.add(m);
+    arena.add(mesh(new THREE.BoxGeometry(0.9, 0.42, 0.5), merlonMat, x, arcSpringY + 0.37, wallZ));
     if (stepped) {
       arena.add(mesh(new THREE.BoxGeometry(0.5, 0.2, 0.5), merlonMat, x, arcSpringY + 0.67, wallZ));
     }
   }
 
-  // ---- the five arches: ROUND, HORSESHOE, giant center HORSESHOE, HORSESHOE, ROUND ----
-  // Dark cut-out plane behind each arch so it reads as a passage, not a floating wreath.
-  const voidMat = new THREE.MeshBasicMaterial({ color: 0x08060c });
-  const white = std(ARENA.tileWhite, 'cloth');
-  const green = std(ARENA.tileEmerald, 'cloth');
-  const sand = std(ARENA.stoneWall, 'cloth');
-  const bays = [
-    { x: -9.6, r: 1.55, type: 'round' },
-    { x: -5.4, r: 1.4, type: 'horseshoe' },
-    { x: 0, r: 2.6, type: 'horseshoe' },
-    { x: 5.4, r: 1.4, type: 'horseshoe' },
-    { x: 9.6, r: 1.55, type: 'round' }
-  ];
-  for (const bay of bays) {
-    const arch = new THREE.Group();
-    arch.position.set(bay.x, arcSpringY, wallZ + 0.4);
-    const sweep = bay.type === 'horseshoe' ? Math.PI * 1.25 : Math.PI;
-    const startAng = bay.type === 'horseshoe'
-      ? Math.PI + (sweep - Math.PI) / 2 - Math.PI
-      : Math.PI;
-    // vista inside the arch opening (v3): masked to the arch shape, sized to
-    // the ring's inner radius (center bay keeps the BTC moon instead)
-    if (bay.r < 2) {
-      const rIn = bay.r - 0.16;
-      const under = 0.42;
-      const vista = mesh(
-        new THREE.PlaneGeometry(2 * rIn, rIn + under),
-        new THREE.MeshBasicMaterial({
-          map: vistaTexture(1000 + Math.round(bay.x * 37), rIn),
-          fog: false, transparent: true, depthWrite: false,
-        }),
-        0, (rIn - under) / 2 - 0.12, -0.25
-      );
-      arch.add(vista);
-    }
-    // torus arc for the arch ring
-    const ring = new THREE.Mesh(torus(bay.r, 0.16, sweep), sand);
-    ring.position.y = bay.type === 'horseshoe' ? -0.12 : 0;
-    arch.add(ring);
-    // alternating voussoirs: boxes along the arc, sized to OVERLAP so the ring
-    // reads as continuous masonry (v3: no bead-gaps between blocks)
-    const arcLen = bay.r * sweep;
-    const n = Math.max(13, Math.round(arcLen / 0.24));
-    const seg = arcLen / (n - 1);
-    for (let i = 0; i < n; i++) {
-      const ang = startAng + (i / (n - 1)) * sweep;
-      const vx = Math.cos(ang) * bay.r;
-      const vy = Math.sin(ang) * bay.r + ring.position.y;
-      const v = mesh(new THREE.BoxGeometry(seg * 1.18, 0.34, 0.42), i % 2 ? white : green, vx, vy, 0);
-      v.rotation.z = ang + Math.PI / 2;
-      arch.add(v);
-    }
-    // keystone rosette on round arches
-    if (bay.type === 'round') {
-      const ros = mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 10), std(ARENA.stoneShadow, 'cloth'), 0, bay.r, 0);
-      ros.rotation.x = Math.PI / 2;
-      arch.add(ros);
-    }
-    arena.add(arch);
-  }
-
-  // ---- floor: big tile plane, medallion under rope center ----
-  const floorTex = floorTexture(true);
+  // ---- floor: paved courtyard, medallion laid as a single decal ----
+  const floorTex = floorTexture();
   floorTex.repeat.set(3, 2);
+  const floorBump = bumpFrom(floorTex.image, 0.8);
+  floorBump.repeat.copy(floorTex.repeat);
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(26, 15),
-    new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 })
+    new THREE.MeshStandardMaterial({ map: floorTex, bumpMap: floorBump, bumpScale: 0.06, roughness: 0.9 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, 0.5);
   floor.receiveShadow = true;
   arena.add(floor);
+
+  const medallion = new THREE.Mesh(
+    new THREE.PlaneGeometry(7.6, 7.6),
+    new THREE.MeshBasicMaterial({
+      map: medallionTexture(), transparent: true, depthWrite: false, opacity: 0.92
+    })
+  );
+  medallion.rotation.x = -Math.PI / 2;
+  medallion.position.set(0, 0.012, 0.4);
+  medallion.renderOrder = 1;
+  arena.add(medallion);
+
   // side ground beyond courtyard
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 60),
@@ -440,7 +352,8 @@ export function buildArena(scene) {
   // ---- dry octagonal fountain at z = -3 ----
   const fountain = new THREE.Group();
   fountain.position.set(0, 0, -3);
-  const basinMat = std(ARENA.stoneShadow, 'cloth');
+  const basinPair = stoneTexture({ seed: 63, base: '#ffffff', blocks: 2, alpha: 0.18, repeatX: 2, repeatY: 1 });
+  const basinMat = texed(ARENA.stoneShadow, 'cloth', basinPair, { bumpScale: 0.1 });
   const basin = mesh(new THREE.CylinderGeometry(1.5, 1.6, 0.35, 8), basinMat, 0, 0.17, 0);
   fountain.add(basin);
   const inner = mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.2, 8), std('#3A3226', 'cloth'), 0, 0.3, 0);
@@ -460,7 +373,8 @@ export function buildArena(scene) {
   groups.coins = coins;
 
   // ---- stone poles at x = +/-10 with cap stones ----
-  const poleMat = std(ARENA.stonePole, 'cloth');
+  const polePair = stoneTexture({ seed: 64, base: '#ffffff', blocks: 3, alpha: 0.14, repeatX: 1, repeatY: 3 });
+  const poleMat = texed(ARENA.stonePole, 'cloth', polePair, { bumpScale: 0.07 });
   const pennants = {};
   for (const side of ['L', 'R']) {
     const x = side === 'L' ? -DIM.spanHalf : DIM.spanHalf;
@@ -469,7 +383,6 @@ export function buildArena(scene) {
     const shaft = mesh(new THREE.CylinderGeometry(0.28, 0.36, DIM.ropeY, 10), poleMat, 0, DIM.ropeY / 2, 0);
     const cap = mesh(new THREE.BoxGeometry(0.8, 0.22, 0.8), poleMat, 0, DIM.ropeY + 0.11, 0);
     pole.add(shaft, cap);
-    // pennant on a short mast
     const mast = mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.1, 6), std(ARENA.iron, 'cloth'), 0, DIM.ropeY + 0.7, 0);
     pole.add(mast);
     const isBuy = side === 'R';
@@ -485,20 +398,19 @@ export function buildArena(scene) {
   }
   groups.pennants = pennants;
 
-  // ---- torches between bays: iron sconces + flickering point lights ----
-  const torchXs = [-7.5, -2.7, 2.7, 7.5];
+  // ---- torches ON the pier tops (they used to float in front of the arches) ----
+  const torchXs = [-7.4, -3.3, 3.3, 7.4];
   for (const tx of torchXs) {
-    const sconce = mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 6), std(ARENA.iron, 'cloth'), tx, 2.6, wallZ + 1.0);
-    sconce.rotation.x = 0.5;
-    arena.add(sconce);
-    const bowl = mesh(new THREE.CylinderGeometry(0.12, 0.06, 0.14, 8), std(ARENA.iron, 'cloth'), tx, 2.82, wallZ + 0.85);
+    const bracket = mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5), std(ARENA.iron, 'cloth'), tx, 3.62, wallZ + 0.42);
+    arena.add(bracket);
+    const bowl = mesh(new THREE.CylinderGeometry(0.14, 0.07, 0.18, 8), std(ARENA.iron, 'cloth'), tx, 3.78, wallZ + 0.66);
     arena.add(bowl);
-    const flame = mesh(new THREE.ConeGeometry(0.09, 0.3, 8),
+    const flame = mesh(new THREE.ConeGeometry(0.11, 0.36, 8),
       new THREE.MeshBasicMaterial({ color: ARENA.torchFlame, fog: false }),
-      tx, 3.0, wallZ + 0.85);
+      tx, 4.02, wallZ + 0.66);
     arena.add(flame);
-    const light = new THREE.PointLight(ARENA.torchGlow, 14, 9, 1.8);
-    light.position.set(tx, 3.1, wallZ + 1.3);
+    const light = new THREE.PointLight(ARENA.torchGlow, 15, 11, 1.8);
+    light.position.set(tx, 4.05, wallZ + 0.95);
     arena.add(light);
     groups.torches.push({ flame, light, seed: Math.random() * 10 });
   }
@@ -507,16 +419,14 @@ export function buildArena(scene) {
 }
 
 // per-frame flicker (spec 5.4: noise-driven intensity)
-// v4: SLOW + SHALLOW. The old mix (sin t*9 / t*23 / t*5 with +-5 on 12)
-// pulsed the wall/floor lighting ~40% at 1-4 Hz, which made the whole
-// background read as "shaking" (measured 20/255 mean change per frame on the
-// wall). Now it breathes like a flame, barely visible on the stonework.
+// v4: SLOW + SHALLOW (the old 1-4 Hz +-40% pulse made the whole background
+// read as "shaking"). v5: same rule, the torches just sit higher now.
 export function updateArena(arena, t) {
   for (const tc of arena.userData.torches || []) {
     const n = Math.sin(t * 1.7 + tc.seed) * 0.5
             + Math.sin(t * 3.1 + tc.seed * 2) * 0.3
             + Math.sin(t * 0.9 + tc.seed) * 0.2;
-    tc.light.intensity = 13 + n * 1.5;
+    tc.light.intensity = 14 + n * 1.6;
     tc.flame.scale.y = 1 + n * 0.18;
     tc.flame.scale.x = 1 - n * 0.09;
   }
