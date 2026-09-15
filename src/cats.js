@@ -570,7 +570,7 @@ export class DuelCat {
 
     // timed states auto-transition to the comic windmill RECOVER (spec 7.2)
     if (st.dur > 0 && st.t >= st.dur && st.name !== 'RECOVER' && st.name !== 'FREEZE' && st.name !== 'BLADE_LOCK') {
-      this.setState('RECOVER', 0.24);
+      this.setState('RECOVER', 0.16);
     }
 
     // smooth toward target pose: v5 settles ~2x faster so short moves read
