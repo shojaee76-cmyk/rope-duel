@@ -336,9 +336,12 @@
 
   /* One REST history fetch per instance (flat weight 2, ACAO *). Failure is
    * harmless: the socket keeps building candles from live ticks, and demo
-   * mode builds its own tape. Never re-fetched on stop()/start(). */
+   * mode builds its own tape. Never re-fetched on stop()/start().
+   * Pure demo mode skips the fetch entirely — the synthetic tape builds its
+   * own candle history and the page must boot with zero network noise. */
   BtcTradeFeed.prototype._seedCandles = function () {
     if (this._seedStarted) return;
+    if (this.mode === 'demo') return;
     this._seedStarted = true;
     var store = this._candles;
     fetch(KLINE_SEED_URL, { cache: 'no-store' })

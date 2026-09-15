@@ -6,195 +6,393 @@
 <title>The Rope Duel | Live BTC/USDT</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23F7931A'/%3E%3Ctext x='16' y='23' font-size='18' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%237A4A08'%3EB%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="./chart.css">
+<link rel="preload" href="./fonts/unbounded-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="./fonts/unbounded-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="./fonts/space-grotesk-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="./fonts/space-grotesk-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  /* ================================================================
+     THE ROPE DUEL — v8 "MIDNIGHT ARENA"
+     Dark OLED stage, gold brand, BUY=emerald / SELL=crimson (t_167a53f3).
+     Double-bezel plates: outer shell (hairline + plate bg, p:7px) around
+     an inner core (panel bg + inset top highlight), concentric radii.
+     Motion: transform/opacity only, custom cubic-beziers, no linear.
+     ================================================================ */
+  @font-face { font-family: 'Unbounded'; src: url('./fonts/unbounded-latin-500-normal.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Unbounded'; src: url('./fonts/unbounded-latin-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Unbounded'; src: url('./fonts/unbounded-latin-900-normal.woff2') format('woff2'); font-weight: 900; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Space Grotesk'; src: url('./fonts/space-grotesk-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Space Grotesk'; src: url('./fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Space Grotesk'; src: url('./fonts/space-grotesk-latin-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+
   :root {
-    --gold: #F5C542; --gold-dim: #D4A017;   /* brand accent (price, title) */
-    /* financial convention (task t_167a53f3): BUY = green, SELL = red */
+    --gold: #F5C542; --gold-bright: #FFDE82; --gold-deep: #8C6B1F;
     --buy: #26A69A; --buy-bright: #35D07F; --buy-dim: #0E4A2C;
     --sell: #EF5350; --sell-bright: #FF8A80; --sell-dim: #7A0C14;
     --up: #26A69A; --down: #EF5350;
-    --ink: #EDE7D8; --ink-dim: #8f8fa8;
-    --panel: rgba(8, 9, 22, 0.72);
-    --edge: rgba(245, 197, 66, 0.25);
+    --ink: #F2EEE3; --ink-dim: #9298B5; --ink-faint: #6E7392;
+    --plate: rgba(10, 12, 26, 0.62);
+    --panel: rgba(13, 16, 32, 0.78);
+    --edge: rgba(245, 197, 66, 0.16);
+    --hairline: rgba(255, 255, 255, 0.08);
+    --font-display: 'Unbounded', 'Segoe UI', system-ui, sans-serif;
+    --font-data: 'Space Grotesk', 'Consolas', 'Courier New', monospace;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-snap: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #05060F; overflow: hidden;
-    font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    font-family: var(--font-data); color: var(--ink);
     -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
-  #duel-scene { position: fixed; inset: 0; }
+  #duel-scene { position: fixed; inset: 0; z-index: 0; }
   #duel-scene canvas { display: block; }
 
-  /* ---------- top HUD ---------- */
-  #hud { position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-    z-index: 10; display: flex; align-items: stretch; gap: 0;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 12px;
-    padding: 8px 14px; backdrop-filter: blur(6px); box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-    max-width: min(96vw, 720px); }
-  .hud-cell { display: flex; flex-direction: column; justify-content: center;
-    padding: 2px 14px; border-right: 1px solid rgba(255,255,255,0.08); min-width: 0; }
+  /* ---------- stage vignette + film grain (static, no repaint) ---------- */
+  #vignette { position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E"),
+      radial-gradient(125% 95% at 50% 40%, rgba(0,0,0,0) 52%, rgba(2,3,10,0.42) 82%, rgba(1,2,8,0.62) 100%); }
+
+  /* ---------- shared entrance (one-shot, staggered) ---------- */
+  @keyframes ui-in { from { opacity: 0; transform: translateY(14px); filter: blur(5px); }
+    to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+  #brand, #hud, #meter, #status, #chart-panel, #tag-buy, #tag-sell {
+    animation: ui-in 0.7s var(--ease-out) backwards; }
+  #brand { animation-delay: 0.05s; } #status { animation-delay: 0.12s; }
+  #hud { animation-delay: 0.10s; } #meter { animation-delay: 0.18s; }
+  #tag-sell { animation-delay: 0.26s; } #tag-buy { animation-delay: 0.26s; }
+  #chart-panel { animation-delay: 0.34s; }
+
+  /* ---------- brand (top-left) ---------- */
+  #brand { position: fixed; top: 14px; left: 18px; z-index: 12; pointer-events: none; }
+  #brand .eyebrow { display: inline-flex; align-items: center; gap: 6px;
+    font: 500 8.5px/1 var(--font-data); letter-spacing: 0.26em; color: var(--ink-dim);
+    text-transform: uppercase; padding: 5px 10px; border: 1px solid var(--hairline);
+    border-radius: 999px; background: rgba(8, 9, 20, 0.45);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  #brand .eyebrow i { width: 5px; height: 5px; border-radius: 50%; background: var(--gold);
+    box-shadow: 0 0 8px 1px rgba(245, 197, 66, 0.7); }
+  #brand h1 { margin: 8px 0 0; font: 900 21px/1 var(--font-display); letter-spacing: 0.06em;
+    background: linear-gradient(180deg, #FFE9A8 0%, var(--gold) 46%, #A87A18 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.75)); }
+
+  /* ---------- status chip (top-right) ---------- */
+  #status { position: fixed; top: 14px; right: 18px; z-index: 12;
+    display: flex; align-items: center; gap: 7px; padding: 7px 12px;
+    background: var(--plate); border: 1px solid var(--hairline); border-radius: 999px;
+    font: 700 9.5px/1 var(--font-data); letter-spacing: 0.18em; color: var(--ink-dim);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35); }
+  #status-dot { width: 7px; height: 7px; border-radius: 50%; background: #666;
+    transition: background 0.3s; }
+  #status-dot.live { background: var(--buy-bright); box-shadow: 0 0 8px var(--buy-bright);
+    animation: pulse 2s infinite; }
+  #status-dot.demo { background: #F5A623; box-shadow: 0 0 8px #F5A623; }
+  #status-dot.connecting { background: var(--gold); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  #status-mode { color: var(--ink); }
+
+  /* ---------- HUD hero (top-center): price dominates ---------- */
+  #hud { position: fixed; top: 12px; left: 50%; translate: -50% 0;
+    z-index: 11; max-width: min(96vw, 620px); padding: 7px; border-radius: 22px;
+    background: var(--plate); border: 1px solid var(--edge);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #hud-inner { display: flex; align-items: stretch; border-radius: 15px;
+    background: var(--panel); border: 1px solid var(--hairline);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.07); }
+  .hud-cell { display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    padding: 9px 18px; border-right: 1px solid var(--hairline); min-width: 0; }
   .hud-cell:last-child { border-right: 0; }
-  .hud-label { font-size: 9px; letter-spacing: 0.14em; color: var(--ink-dim);
-    text-transform: uppercase; white-space: nowrap; }
-  .hud-value { font: 600 20px/1.15 "Consolas", "Courier New", monospace;
-    color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  #chg24h { font-size: 13px; font-weight: 600; white-space: nowrap;
+  .hud-label { font: 500 8.5px/1 var(--font-data); letter-spacing: 0.24em;
+    color: var(--ink-faint); text-transform: uppercase; white-space: nowrap; }
+  .hud-value { font: 700 30px/1 var(--font-display); color: var(--gold);
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 24px rgba(245, 197, 66, 0.25); transition: color 0.5s var(--ease-out); }
+  #price.tick-up { color: var(--buy-bright); text-shadow: 0 0 26px rgba(53, 208, 127, 0.45); }
+  #price.tick-down { color: var(--sell-bright); text-shadow: 0 0 26px rgba(255, 138, 128, 0.4); }
+  #chg24h { font: 700 13px/1.1 var(--font-data); white-space: nowrap;
     font-variant-numeric: tabular-nums; }
+  #tps { color: var(--ink); }
   .up { color: var(--up); } .down { color: var(--down); }
 
-  /* ---------- pressure meter (sword vs sword) ---------- */
-  #meter { position: fixed; top: 86px; left: 50%; transform: translateX(-50%);
-    z-index: 10; width: min(46vw, 340px); height: 26px;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 13px;
-    overflow: hidden; backdrop-filter: blur(6px); }
-  #meter-buy { position: absolute; top: 0; bottom: 0; left: 50%;
-    background: linear-gradient(to right, var(--buy-bright), rgba(38,166,154,0.15));
-    width: 0%; transition: width 0.22s ease-out; }
-  #meter-sell { position: absolute; top: 0; bottom: 0; right: 50%;
-    background: linear-gradient(to left, var(--sell-dim), rgba(239,83,80,0.15));
-    width: 0%; transition: width 0.22s ease-out; }
+  /* ---------- pressure meter: tug-of-war blade ---------- */
+  #meter { position: fixed; top: 92px; left: 50%; translate: -50% 0;
+    z-index: 10; width: min(50vw, 470px); padding: 6px; border-radius: 20px;
+    background: var(--plate); border: 1px solid var(--hairline);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  #meter-track { position: relative; height: 46px; border-radius: 14px; overflow: hidden;
+    background: var(--panel);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.06); }
+  #meter-buy { position: absolute; top: 0; bottom: 0; left: 50%; width: 0%;
+    background: linear-gradient(270deg, rgba(53, 208, 127, 0.95), rgba(38, 166, 154, 0.28) 78%, rgba(38, 166, 154, 0.05));
+    transition: width 0.5s var(--ease-out); }
+  #meter-sell { position: absolute; top: 0; bottom: 0; right: 50%; width: 0%;
+    background: linear-gradient(90deg, rgba(239, 83, 80, 0.95), rgba(239, 83, 80, 0.28) 78%, rgba(239, 83, 80, 0.05));
+    transition: width 0.5s var(--ease-out); }
+  /* leading-edge spark on each fill */
+  #meter-buy::after, #meter-sell::after { content: ""; position: absolute; top: 50%;
+    width: 9px; height: 9px; margin-top: -4.5px; transform: rotate(45deg);
+    background: #fff; opacity: 0.9; }
+  #meter-buy::after { right: -4px; border-radius: 2px;
+    box-shadow: 0 0 12px 3px rgba(53, 208, 127, 0.9); }
+  #meter-sell::after { left: -4px; border-radius: 2px;
+    box-shadow: 0 0 12px 3px rgba(239, 83, 80, 0.9); }
   #meter-center { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
-    margin-left: -1px; background: rgba(255,255,255,0.75); z-index: 2; }
+    margin-left: -1px; background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.85) 50%, rgba(255,255,255,0.05));
+    z-index: 2; }
+  #meter-duel { position: absolute; left: 50%; top: 0; transform: translate(-50%, -50%);
+    z-index: 4; display: flex; align-items: center; gap: 6px; pointer-events: none;
+    font: 700 9.5px/1 var(--font-data); letter-spacing: 0.22em; color: var(--ink);
+    padding: 5px 11px; border-radius: 999px; background: rgba(5, 6, 15, 0.85);
+    border: 1px solid var(--hairline); white-space: nowrap;
+    transition: color 0.25s, border-color 0.25s, box-shadow 0.25s; }
+  #meter-duel.act { color: var(--gold-bright); border-color: rgba(245, 197, 66, 0.55);
+    box-shadow: 0 0 18px rgba(245, 197, 66, 0.28); }
+  #meter-duel i { width: 6px; height: 6px; transform: rotate(45deg); background: var(--gold);
+    border-radius: 1px; }
+  #meter-duel.act i { animation: duel-spin 0.7s var(--ease-snap) infinite alternate; }
+  @keyframes duel-spin { from { transform: rotate(45deg) scale(1); }
+    to { transform: rotate(225deg) scale(1.25); } }
   #meter-blah { position: absolute; inset: 0; display: flex; align-items: center;
-    justify-content: space-between; padding: 0 10px; z-index: 3;
-    font: 700 10px/1 "Consolas", monospace; letter-spacing: 0.1em; pointer-events: none; }
-  #meter-blah .b { color: var(--buy-bright); } #meter-blah .s { color: var(--sell-bright); }
-  .sword { font-size: 14px; filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); }
+    justify-content: space-between; padding: 0 14px; z-index: 3; pointer-events: none;
+    font: 700 10px/1 var(--font-data); letter-spacing: 0.16em; }
+  #meter-blah .s { color: var(--sell-bright); display: flex; align-items: center; gap: 7px; }
+  #meter-blah .b { color: var(--buy-bright); display: flex; align-items: center; gap: 7px; }
+  #meter-blah .pct { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .sword-ico { width: 13px; height: 13px; flex: 0 0 auto; }
+  .sword-ico path, .sword-ico rect, .sword-ico circle { fill: currentColor; }
 
-  /* ---------- cat labels ---------- */
-  .cat-tag { position: fixed; bottom: 18px; z-index: 10;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
-    padding: 6px 14px; font: 700 12px/1.4 "Consolas", monospace; letter-spacing: 0.08em;
-    backdrop-filter: blur(6px); pointer-events: none; }
-  .cat-tag small { display: block; font-weight: 400; font-size: 9px;
-    color: var(--ink-dim); letter-spacing: 0.14em; }
-  #tag-buy { right: 16px; text-align: right; color: var(--buy-bright); border-right: 3px solid var(--buy-bright); }
-  #tag-sell { left: 16px; text-align: left; color: var(--sell-bright); border-left: 3px solid var(--sell-bright); }
+  /* ---------- fighter plates (left = SELL / right = BUY) ---------- */
+  .plate { position: fixed; top: 46%; translate: 0 -50%; z-index: 10; width: 172px;
+    padding: 6px; border-radius: 20px; background: var(--plate);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: transform 0.45s var(--ease-snap), box-shadow 0.45s var(--ease-out),
+      border-color 0.45s var(--ease-out); }
+  #tag-sell { left: 16px; border-left: 3px solid var(--sell-bright); }
+  #tag-buy { right: 16px; border-right: 3px solid var(--buy-bright); }
+  .plate-core { border-radius: 14px; background: var(--panel);
+    border: 1px solid var(--hairline); box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    padding: 11px 12px 10px; text-align: left; }
+  #tag-buy .plate-core { text-align: right; }
+  .plate-crest { display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 10px; margin-bottom: 7px; }
+  #tag-sell .plate-crest { background: rgba(122, 12, 20, 0.4);
+    border: 1px solid rgba(239, 83, 80, 0.4); color: var(--sell-bright); }
+  #tag-buy .plate-crest { background: rgba(14, 74, 44, 0.4);
+    border: 1px solid rgba(53, 208, 127, 0.4); color: var(--buy-bright); }
+  .plate-name { font: 700 12.5px/1.25 var(--font-display); letter-spacing: 0.05em;
+    color: var(--ink); }
+  .plate-role { margin-top: 3px; font: 700 8.5px/1 var(--font-data);
+    letter-spacing: 0.22em; }
+  #tag-sell .plate-role { color: var(--sell-bright); }
+  #tag-buy .plate-role { color: var(--buy-bright); }
+  .plate-momentum { margin-top: 9px; height: 4px; border-radius: 2px;
+    background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+  .plate-momentum i { display: block; height: 100%; width: 4%;
+    border-radius: 2px; transition: width 0.5s var(--ease-out); }
+  #tag-sell .plate-momentum i { background: linear-gradient(90deg, var(--sell), var(--sell-bright));
+    margin-left: auto; }
+  #tag-buy .plate-momentum i { background: linear-gradient(90deg, var(--buy), var(--buy-bright)); }
+  .plate-state { margin-top: 8px; font: 700 9px/1 var(--font-data);
+    letter-spacing: 0.2em; color: #9BA1BD; text-transform: uppercase;
+    transition: color 0.2s; }
+  /* combat reactions (data-act is driven from the live fight state).
+     Centering lives on the `translate` property, so `transform` here only
+     carries the reaction motion and composes cleanly with it. */
+  .plate[data-act="lunge"] { transform: translateX(var(--lunge-dx, 0)) scale(1.03); }
+  #tag-sell[data-act="lunge"] { --lunge-dx: 7px; }
+  #tag-buy[data-act="lunge"] { --lunge-dx: -7px; }
+  .plate[data-act="lock"] .plate-core, .plate[data-act="clash"] .plate-core {
+    animation: plate-shake 0.4s var(--ease-out); }
+  @keyframes plate-shake { 0%, 100% { translate: 0 0; } 25% { translate: -2px 1px; }
+    50% { translate: 2px -1px; } 75% { translate: -1px -1px; } }
+  .plate[data-act="hit"] { animation: plate-hit 0.45s var(--ease-snap); }
+  @keyframes plate-hit { 0% { transform: scale(0.94); filter: brightness(1.8); }
+    60% { transform: scale(1.04); } 100% { transform: scale(1); filter: brightness(1); } }
+  .plate[data-act="hit"] .plate-state { color: var(--gold-bright); }
+  .plate[data-act="lock"] .plate-state, .plate[data-act="clash"] .plate-state,
+  .plate[data-act="lunge"] .plate-state, .plate[data-act="rush"] .plate-state {
+    color: var(--gold-bright); }
+  .plate.surge { border-color: var(--edge); }
+  #tag-sell.surge { box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45), 0 0 26px rgba(239, 83, 80, 0.22); }
+  #tag-buy.surge { box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45), 0 0 26px rgba(53, 208, 127, 0.22); }
 
   /* ---------- trade callouts ---------- */
   #callouts { position: fixed; inset: 0; z-index: 9; pointer-events: none; overflow: hidden; }
   .callout { position: absolute; will-change: transform, opacity;
-    font: 800 15px/1 "Consolas", monospace; padding: 5px 10px; border-radius: 8px;
-    animation: callout-float 2.2s ease-out forwards; white-space: nowrap;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
-  .callout.buy { color: #A8F0D0; background: rgba(14,74,44,0.55);
-    border: 1px solid rgba(53,208,127,0.6); }
-  .callout.sell { color: #FFC9C4; background: rgba(122,12,20,0.55);
-    border: 1px solid rgba(239,83,80,0.6); }
-  .callout .qty { font-weight: 400; font-size: 11px; opacity: 0.85; margin-left: 5px; }
-  .callout.whale { font-size: 19px; animation: callout-float 2.6s ease-out forwards; }
+    display: flex; flex-direction: column; gap: 2px; padding: 8px 13px;
+    border-radius: 13px; animation: callout-float 2.3s var(--ease-out) forwards;
+    white-space: nowrap; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .callout .head { display: flex; align-items: center; gap: 6px;
+    font: 700 14px/1 var(--font-data); font-variant-numeric: tabular-nums; }
+  .callout .arr { font-size: 10px; }
+  .callout .qty { font: 500 10px/1 var(--font-data); letter-spacing: 0.06em;
+    opacity: 0.85; font-variant-numeric: tabular-nums; }
+  .callout.buy { color: #C9F5DF; background: rgba(10, 42, 28, 0.62);
+    border: 1px solid rgba(53, 208, 127, 0.55);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.1); }
+  .callout.buy .arr { color: var(--buy-bright); }
+  .callout.sell { color: #FFD9D5; background: rgba(64, 10, 14, 0.62);
+    border: 1px solid rgba(239, 83, 80, 0.55);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.1); }
+  .callout.sell .arr { color: var(--sell-bright); }
+  .callout.whale { padding: 10px 16px; border-radius: 15px;
+    animation: callout-float 2.8s var(--ease-out) forwards; }
+  .callout.whale .head { font-size: 18px; }
+  .callout.whale.buy { border-color: var(--buy-bright);
+    box-shadow: 0 6px 26px rgba(0, 0, 0, 0.5), 0 0 24px rgba(53, 208, 127, 0.3); }
+  .callout.whale.sell { border-color: var(--sell-bright);
+    box-shadow: 0 6px 26px rgba(0, 0, 0, 0.5), 0 0 24px rgba(239, 83, 80, 0.3); }
+  .callout.whale::after { content: ""; position: absolute; inset: -2px; border-radius: 17px;
+    border: 1px solid currentColor; opacity: 0;
+    animation: shockwave 0.9s var(--ease-out) forwards; }
+  @keyframes shockwave { 0% { opacity: 0.7; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.45); } }
   @keyframes callout-float {
-    0%   { opacity: 0; transform: translateY(8px) scale(0.8); }
-    12%  { opacity: 1; transform: translateY(0) scale(1.06); }
-    22%  { transform: translateY(-2px) scale(1); }
-    75%  { opacity: 0.9; }
-    100% { opacity: 0; transform: translateY(-64px) scale(0.96); }
-  }
+    0% { opacity: 0; transform: translateY(10px) scale(0.82); }
+    12% { opacity: 1; transform: translateY(0) scale(1.07); }
+    24% { transform: translateY(-2px) scale(1); }
+    74% { opacity: 0.92; }
+    100% { opacity: 0; transform: translateY(-68px) scale(0.97); } }
 
-  /* ---------- status line ---------- */
-  #status { position: fixed; top: 10px; right: 12px; z-index: 10;
-    display: flex; align-items: center; gap: 6px;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
-    padding: 5px 10px; font: 600 10px/1 "Consolas", monospace; letter-spacing: 0.1em;
-    color: var(--ink-dim); backdrop-filter: blur(6px); }
-  #status-dot { width: 8px; height: 8px; border-radius: 50%;
-    background: #666; box-shadow: 0 0 6px transparent; transition: background 0.3s; }
-  #status-dot.live { background: #35D07F; box-shadow: 0 0 6px #35D07F; animation: pulse 2s infinite; }
-  #status-dot.demo { background: #F5A623; box-shadow: 0 0 6px #F5A623; }
-  #status-dot.connecting { background: #F5C542; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
-  #status-mode { color: var(--ink); }
-
-  /* ---------- title ---------- */
-  #brand { position: fixed; top: 10px; left: 12px; z-index: 10; pointer-events: none; }
-  #brand h1 { margin: 0; font: 700 15px/1.2 "Consolas", monospace; letter-spacing: 0.18em;
-    color: var(--gold); text-shadow: 0 1px 8px rgba(0,0,0,0.8); }
-  #brand p { margin: 1px 0 0; font: 400 9px/1.4 "Consolas", monospace;
-    letter-spacing: 0.12em; color: var(--ink-dim); }
-
-  /* ---------- fallback notice ---------- */
+  /* ---------- WebGL fallback ---------- */
   #nogl { position: fixed; inset: 0; z-index: 50; display: none;
     align-items: center; justify-content: center; background: #05060F;
     text-align: center; padding: 24px; }
-  #nogl div { max-width: 420px; }
-  #nogl h2 { color: var(--gold); font: 700 18px/1.4 "Consolas", monospace; }
-  #nogl p { color: var(--ink-dim); font: 400 13px/1.6 "Segoe UI", sans-serif; }
+  #nogl > div { max-width: 430px; padding: 26px; border-radius: 24px;
+    background: var(--panel); border: 1px solid var(--hairline);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.07), 0 20px 60px rgba(0, 0, 0, 0.6); }
+  #nogl h2 { margin: 0 0 8px; color: var(--gold); font: 700 17px/1.4 var(--font-display); }
+  #nogl p { margin: 0; color: var(--ink-dim); font: 400 13px/1.65 var(--font-data); }
 
-  /* ---------- mobile ---------- */
-  @media (max-width: 640px) {
-    #brand p { display: none; }
-    #brand h1 { font-size: 12px; }
-    .hud-cell { padding: 2px 8px; }
-    #hud .hud-cell.hud-24h { display: none; }
-    .hud-value { font-size: 15px; }
-    #meter { width: 60vw; top: 76px; }
-    .cat-tag { font-size: 10px; padding: 4px 8px; bottom: 12px; }
-    .callout { font-size: 12px; }
-    .callout.whale { font-size: 15px; }
-    #status { top: auto; bottom: 12px; right: 10px; }
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    .plate { width: 150px; }
+    .hud-value { font-size: 24px; }
   }
-  @media (max-height: 460px) { #meter { display: none; } }
+  @media (max-width: 640px) {
+    #brand { top: 10px; left: 12px; }
+    #brand h1 { font-size: 15px; }
+    #brand .eyebrow { font-size: 7.5px; padding: 4px 8px; letter-spacing: 0.18em; }
+    #status { top: auto; bottom: 12px; right: 10px; }
+    #hud { top: 8px; padding: 5px; border-radius: 18px; }
+    #hud-inner { border-radius: 13px; }
+    .hud-cell { padding: 7px 10px; }
+    .hud-value { font-size: 18px; }
+    #hud .hud-cell.hud-24h { display: none; }
+    #chg24h { font-size: 11px; }
+    #meter { width: 78vw; top: 64px; padding: 5px; }
+    #meter-track { height: 40px; }
+    #meter-duel { font-size: 8px; padding: 4px 8px; letter-spacing: 0.14em; }
+    .plate { top: 38%; width: 128px; padding: 4px; border-radius: 15px; }
+    #tag-sell { left: 10px; } #tag-buy { right: 10px; }
+    .plate-core { padding: 8px 9px 7px; border-radius: 11px; }
+    .plate-crest { width: 24px; height: 24px; border-radius: 8px; margin-bottom: 5px; }
+    .plate-name { font-size: 10px; }
+    .plate-role { font-size: 7px; letter-spacing: 0.16em; }
+    .plate-state { font-size: 7px; margin-top: 6px; }
+    .plate-momentum { margin-top: 6px; }
+    .callout { font-size: 12px; padding: 6px 10px; border-radius: 10px; }
+    .callout .head { font-size: 12px; }
+    .callout.whale { font-size: 14px; }
+  }
   @media (max-width: 420px) {
-    .hud-cell:last-child { display: none; } /* trades/s yields room to the title */
-    #brand h1 { font-size: 10px; letter-spacing: 0.1em; }
+    #hud .hud-cell:last-child { display: none; } /* trades/s yields room */
+    #brand h1 { font-size: 12px; letter-spacing: 0.04em; }
+    .hud-value { font-size: 16px; }
+    .plate { width: 112px; }
+  }
+  @media (max-height: 460px) {
+    #meter { top: 58px; }
+    #meter-track { height: 34px; }
+    .plate { top: 42%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #brand, #hud, #meter, #status, #chart-panel, #tag-buy, #tag-sell { animation: none; }
+    #status-dot.live, #meter-duel.act i, .callout, .callout.whale::after { animation: none; }
+    #meter-buy, #meter-sell, .plate-momentum i { transition-duration: 0.01s; }
   }
 </style>
 </head>
 <body>
 <div id="duel-scene"></div>
+<div id="vignette"></div>
 
 <div id="brand">
-  <h1>⚔ THE ROPE DUEL</h1>
-  <p>BUY CAT vs SELL CAT &middot; LIVE BTC/USDT ORDER FLOW</p>
+  <span class="eyebrow"><i></i>LIVE BTC/USDT ORDER FLOW</span>
+  <h1>THE ROPE DUEL</h1>
 </div>
-
-<div id="hud" aria-live="off">
-  <div class="hud-cell">
-    <span class="hud-label">BTC / USDT</span>
-    <span class="hud-value" id="price">connecting&hellip;</span>
-  </div>
-  <div class="hud-cell hud-24h">
-    <span class="hud-label">24h</span>
-    <span id="chg24h">&mdash;</span>
-  </div>
-  <div class="hud-cell">
-    <span class="hud-label">Trades / s</span>
-    <span class="hud-value" id="tps" style="color: var(--ink)">0</span>
-  </div>
-</div>
-
-<div id="meter" role="meter" aria-label="buy versus sell pressure">
-  <div id="meter-buy"></div>
-  <div id="meter-sell"></div>
-  <div id="meter-center"></div>
-  <div id="meter-blah">
-    <span class="s">&#9876; SELL</span>
-    <span class="b">BUY &#9876;</span>
-  </div>
-</div>
-
-<div class="cat-tag" id="tag-sell">
-  &#9876; SULTAN BIGOTES
-  <small>SELL PRESSURE</small>
-</div>
-<div class="cat-tag" id="tag-buy">
-  DON GATO &#9876;
-  <small>BUY PRESSURE</small>
-</div>
-
-<div id="chart-panel" aria-label="live BTC/USDT 1-second candlestick chart">
-  <div id="chart-head">
-    <span id="chart-title"><b>BTC/USDT</b> &middot; 1s CANDLES &middot; BINANCE SPOT</span>
-    <span id="chart-chip" class="load"><span id="chart-chip-text">LOADING&hellip;</span></span>
-  </div>
-  <canvas id="chart-canvas"></canvas>
-</div>
-
-<div id="callouts"></div>
 
 <div id="status">
   <span id="status-dot"></span>
   <span id="status-mode">CONNECTING</span>
 </div>
+
+<div id="hud" aria-live="off">
+  <div id="hud-inner">
+    <div class="hud-cell">
+      <span class="hud-label">BTC / USDT</span>
+      <span class="hud-value" id="price">connecting&hellip;</span>
+    </div>
+    <div class="hud-cell hud-24h">
+      <span class="hud-label">24h</span>
+      <span id="chg24h">&mdash;</span>
+    </div>
+    <div class="hud-cell">
+      <span class="hud-label">Trades / s</span>
+      <span class="hud-value" id="tps" style="font-size: 21px; color: var(--ink)">0</span>
+    </div>
+  </div>
+</div>
+
+<div id="meter" role="meter" aria-label="buy versus sell pressure">
+  <div id="meter-track">
+    <div id="meter-buy"></div>
+    <div id="meter-sell"></div>
+    <div id="meter-center"></div>
+    <div id="meter-blah">
+      <span class="s"><span class="pct" id="meter-sell-pct">0%</span><svg class="sword-ico" viewBox="0 0 16 16" aria-hidden="true"><g transform="rotate(-45 8 8)"><path d="M8 0.8 L9.5 3.2 L9.5 9.2 L6.5 9.2 L6.5 3.2 Z"/><rect x="3.6" y="9.2" width="8.8" height="1.5" rx="0.75"/><rect x="7.25" y="10.7" width="1.5" height="2.6" rx="0.75"/><circle cx="8" cy="14.2" r="1.25"/></g></svg>SELL</span>
+      <span class="b">BUY<svg class="sword-ico" viewBox="0 0 16 16" aria-hidden="true"><g transform="rotate(45 8 8)"><path d="M8 0.8 L9.5 3.2 L9.5 9.2 L6.5 9.2 L6.5 3.2 Z"/><rect x="3.6" y="9.2" width="8.8" height="1.5" rx="0.75"/><rect x="7.25" y="10.7" width="1.5" height="2.6" rx="0.75"/><circle cx="8" cy="14.2" r="1.25"/></g></svg><span class="pct" id="meter-buy-pct">0%</span></span>
+    </div>
+    <div id="meter-duel"><i></i><span id="meter-duel-text">EN GARDE</span></div>
+  </div>
+</div>
+
+<div class="plate" id="tag-sell" data-act="">
+  <div class="plate-core">
+    <span class="plate-crest"><svg class="sword-ico" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><g transform="rotate(-45 8 8)"><path d="M8 0.8 L9.5 3.2 L9.5 9.2 L6.5 9.2 L6.5 3.2 Z"/><rect x="3.6" y="9.2" width="8.8" height="1.5" rx="0.75"/><rect x="7.25" y="10.7" width="1.5" height="2.6" rx="0.75"/><circle cx="8" cy="14.2" r="1.25"/></g></svg></span>
+    <div class="plate-name">SULTAN BIGOTES</div>
+    <div class="plate-role">SELL PRESSURE</div>
+    <div class="plate-momentum"><i id="mom-sell"></i></div>
+    <div class="plate-state" id="state-sell">EN GARDE</div>
+  </div>
+</div>
+<div class="plate" id="tag-buy" data-act="">
+  <div class="plate-core">
+    <span class="plate-crest"><svg class="sword-ico" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><g transform="rotate(45 8 8)"><path d="M8 0.8 L9.5 3.2 L9.5 9.2 L6.5 9.2 L6.5 3.2 Z"/><rect x="3.6" y="9.2" width="8.8" height="1.5" rx="0.75"/><rect x="7.25" y="10.7" width="1.5" height="2.6" rx="0.75"/><circle cx="8" cy="14.2" r="1.25"/></g></svg></span>
+    <div class="plate-name">DON GATO</div>
+    <div class="plate-role">BUY PRESSURE</div>
+    <div class="plate-momentum"><i id="mom-buy"></i></div>
+    <div class="plate-state" id="state-buy">EN GARDE</div>
+  </div>
+</div>
+
+<div id="chart-panel" aria-label="live BTC/USDT 1-second candlestick chart">
+  <div id="chart-inner">
+    <div id="chart-head">
+      <span id="chart-title"><b>BTC/USDT</b> &middot; 1s CANDLES &middot; BINANCE SPOT</span>
+      <span id="chart-chip" class="load"><span id="chart-chip-text">LOADING&hellip;</span></span>
+    </div>
+    <canvas id="chart-canvas"></canvas>
+  </div>
+</div>
+
+<div id="callouts"></div>
 
 <div id="nogl">
   <div>

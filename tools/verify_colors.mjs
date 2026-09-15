@@ -69,6 +69,8 @@ const styles = await page.evaluate(() => {
     },
     tagBuy: { color: tagBuy.color, borderRight: tagBuy.borderRightColor },
     tagSell: { color: tagSell.color, borderLeft: tagSell.borderLeftColor },
+    roleBuy: { color: cs(document.querySelector('#tag-buy .plate-role')).color },
+    roleSell: { color: cs(document.querySelector('#tag-sell .plate-role')).color },
     meterBuyBg: meterBuy.backgroundImage,
     meterSellBg: meterSell.backgroundImage,
     calloutBuy: { color: cb.color, border: cb.borderTopColor, bg: cb.backgroundColor },

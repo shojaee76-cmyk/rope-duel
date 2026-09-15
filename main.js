@@ -1,6 +1,8 @@
-// main.js — page boot for THE ROPE DUEL (integration task t_e2039773).
+// main.js — page boot for THE ROPE DUEL (integration task t_e2039773,
+// v8 "Midnight Arena" UI pass t_addd6df0).
 // Combines the live BTC/USDT feed (feed.js, UMD global) with the Three.js
-// duel scene, the HUD, pressure meter, cat tags, and trade callouts.
+// duel scene, the HUD, pressure meter, fighter plates, trade callouts and
+// the embedded candle chart.
 //
 // URL params:  ?mode=live|demo|auto   (feed mode, default auto)
 //              ?seed=N               (demo tape seed)
@@ -37,8 +39,14 @@ const scene = createDuelScene($('duel-scene'), {
 /* ---------- HUD refs ---------- */
 const priceEl = $('price'), chgEl = $('chg24h'), tpsEl = $('tps');
 const meterBuy = $('meter-buy'), meterSell = $('meter-sell');
+const meterBuyPct = $('meter-buy-pct'), meterSellPct = $('meter-sell-pct');
+const meterDuelEl = $('meter-duel'), meterDuelTxt = $('meter-duel-text');
 const dotEl = $('status-dot'), modeEl = $('status-mode');
 const calloutLayer = $('callouts');
+const plates = {
+  buy: { el: $('tag-buy'), state: $('state-buy'), mom: $('mom-buy'), last: '' },
+  sell: { el: $('tag-sell'), state: $('state-sell'), mom: $('mom-sell'), last: '' }
+};
 
 /* ---------- embedded live chart (task t_189fb722) ----------
    Panel markup lives in index.html (#chart-panel), styles in chart.css.
@@ -54,9 +62,22 @@ function fmtUsd(v) {
   return v.toFixed(1);
 }
 
+/* ---------- big price: flash green/red on the tape direction ---------- */
+let lastPrice = null, tickTimer = 0;
+function priceFlash(p) {
+  if (p != null && lastPrice != null && p !== lastPrice) {
+    priceEl.classList.remove('tick-up', 'tick-down');
+    void priceEl.offsetWidth; // restart the transition even at 4 Hz updates
+    priceEl.classList.add(p > lastPrice ? 'tick-up' : 'tick-down');
+    clearTimeout(tickTimer);
+    tickTimer = setTimeout(() => priceEl.classList.remove('tick-up', 'tick-down'), 600);
+  }
+  if (p != null) lastPrice = p;
+}
+
 /* ---------- trade callouts (+BUY / -SELL, size by notional) ---------- */
 const CALLOUT_MIN = 50000;      // USD — matches the adapter threshold
-const WHALE_MIN = 250000;       // USD — bigger pop
+const WHALE_MIN = 250000;       // USD — bigger pop + shockwave ring
 const MAX_CALLOUTS = 14;
 function spawnCallout(info) {
   if (!info || info.notional < CALLOUT_MIN) return;
@@ -64,20 +85,33 @@ function spawnCallout(info) {
     calloutLayer.firstElementChild.remove();
   }
   const whale = info.notional >= WHALE_MIN;
+  const buy = info.side === 'buy';
   chart.trade(info); // dot on the embedded chart at the trade price
   const el = document.createElement('div');
   el.className = `callout ${info.side}${whale ? ' whale' : ''}`;
-  el.textContent = `${info.side === 'buy' ? '+BUY' : '-SELL'} $${fmtUsd(info.notional)}`;
+  const head = document.createElement('span');
+  head.className = 'head';
+  const arr = document.createElement('span');
+  arr.className = 'arr';
+  arr.textContent = buy ? '▲' : '▼';
+  const amt = document.createElement('span');
+  amt.textContent = `${buy ? '+BUY' : '-SELL'} $${fmtUsd(info.notional)}`;
+  head.appendChild(arr); head.appendChild(amt);
   const q = document.createElement('span');
   q.className = 'qty';
   q.textContent = `${info.qty >= 1 ? info.qty.toFixed(2) : info.qty.toFixed(4)} BTC @ ${info.price.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-  el.appendChild(q);
-  // pop near the acting cat: BUY = right band (Don Gato), SELL = left band
-  const bandX = info.side === 'buy' ? 62 : 24;       // vw
+  el.appendChild(head); el.appendChild(q);
+  // pop near the acting fighter plate: BUY = right band (Don Gato), SELL = left;
+  // then clamp so the pill never clips at the viewport edge
+  const bandX = buy ? 62 : 22;       // vw
   el.style.left = (bandX + Math.random() * 14) + 'vw';
-  el.style.top = (30 + Math.random() * 34) + 'vh';
+  el.style.top = (26 + Math.random() * 36) + 'vh';
   calloutLayer.appendChild(el);
-  setTimeout(() => el.remove(), 2700);
+  const px = el.getBoundingClientRect();
+  if (px.right > innerWidth - 12) el.style.left = Math.max(12, innerWidth - px.width - 12) + 'px';
+  if (px.left < 12) el.style.left = '12px';
+  if (px.bottom > innerHeight - 12) el.style.top = Math.max(12, innerHeight - px.height - 12) + 'px';
+  setTimeout(() => el.remove(), whale ? 3000 : 2600);
 }
 scene.onTradeCallout(spawnCallout); // NOTE: single registration; the adapter routes via onCallout
 
@@ -100,10 +134,33 @@ const unwire = wireFeedToScene(feed, scene, {
   onState: handleState
 });
 
+/* ---------- pressure meter + fighter plates ---------- */
+const FIGHT_LABELS = {
+  IDLE: 'EN GARDE', RECOVER: 'RECOVERING', LUNGE: 'LUNGE!', RUSH: 'RUSH!',
+  SLASH_UP: 'SLASH UP!', SLASH_SPIN: 'SLASH SPIN!', HIT: 'HIT!',
+  STUMBLE: 'STAGGERS!', BLADE_LOCK: 'BLADE LOCK', CLASH: 'CLASH!',
+  FREEZE: 'EN GARDE', TAUNT: 'TAUNTS!', RIPOSTE: 'RIPOSTE!', PARRY_HOP: 'PARRY!'
+};
+function actFor(name) {
+  if (name === 'LUNGE' || name === 'RUSH' || name === 'RIPOSTE') return 'lunge';
+  if (name === 'BLADE_LOCK') return 'lock';
+  if (name === 'CLASH') return 'clash';
+  if (name === 'HIT' || name === 'STUMBLE') return 'hit';
+  return '';
+}
+function setFighter(side, name) {
+  const p = plates[side];
+  if (!p || name === p.last) return;
+  p.last = name;
+  const act = actFor(name);
+  p.el.dataset.act = act;
+  p.state.textContent = FIGHT_LABELS[name] || name;
+}
 function handleState(s) {
     // embedded chart: candle store snapshot + latest meta (rev-gated redraw)
     chart.update(feed.candles(), s);
-    // big HUD price
+    // big HUD price + direction flash
+    priceFlash(s.price);
     priceEl.textContent = s.price
       ? s.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : 'connecting…';
@@ -115,11 +172,40 @@ function handleState(s) {
     }
     // trades/sec
     tpsEl.textContent = isFinite(s.tps) ? Math.round(s.tps) : '0';
-    // pressure meter: |P| drives bar widths from the center line
+    // pressure meter: |P| drives bar widths from the center line + % labels
     const P = s.pressure || 0;
-    meterBuy.style.width = (P > 0 ? P * 50 : 0) + '%';
-    meterSell.style.width = (P < 0 ? -P * 50 : 0) + '%';
+    const buyW = P > 0 ? P * 50 : 0, sellW = P < 0 ? -P * 50 : 0;
+    meterBuy.style.width = buyW + '%';
+    meterSell.style.width = sellW + '%';
+    meterBuyPct.textContent = buyW > 0.5 ? Math.round(P * 100) + '%' : '—';
+    meterSellPct.textContent = sellW > 0.5 ? Math.round(-P * 100) + '%' : '—';
+    // fighter plate momentum bars
+    plates.buy.mom.style.width = Math.max(4, buyW * 2) + '%';
+    plates.sell.mom.style.width = Math.max(4, sellW * 2) + '%';
 }
+
+/* ---------- duel-state pill + plate reactions (real fight telemetry) ----
+   __duelDebug exposes the live director state; poll at 8 Hz (transform-only
+   CSS reactions, so this is cheap and independent of the feed). */
+let lastDuelKey = '';
+setInterval(() => {
+  try {
+    const d = window.__duelDebug;
+    if (!d || !d.catA || !d.catB) return;
+    const an = d.catA.state.name, bn = d.catB.state.name;
+    // catA = Don Gato (BUY, right), catB = Sultan Bigotes (SELL, left)
+    setFighter('buy', an); setFighter('sell', bn);
+    const key = an + '|' + bn;
+    if (key === lastDuelKey) return;
+    lastDuelKey = key;
+    const hot = an !== 'IDLE' || bn !== 'IDLE';
+    meterDuelEl.classList.toggle('act', hot);
+    meterDuelTxt.textContent =
+      (an === 'BLADE_LOCK' || bn === 'BLADE_LOCK') ? 'BLADE LOCK' :
+      (an === 'CLASH' || bn === 'CLASH') ? 'CLASH!' :
+      (an === 'IDLE' && bn === 'IDLE') ? 'EN GARDE' : 'CROSSED SWORDS';
+  } catch (e) { /* scene not up yet */ }
+}, 125);
 
 feed.start();
 
