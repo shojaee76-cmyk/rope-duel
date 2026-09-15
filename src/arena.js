@@ -128,8 +128,10 @@ function floorTexture() {
   return canvasTexture(c);
 }
 
-// the duel medallion: ONE eight-point star split gold / emerald, transparent
-// background so it can be laid over the paving as a decal
+// the duel medallion: ONE eight-point star split BUY-green / SELL-red,
+// transparent background so it can be laid over the paving as a decal
+// (convention flip, task t_167a53f3: the star tip pointing at the BUY pole is
+// green, the tip pointing at the SELL pole is red)
 function medallionTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 512;
@@ -156,8 +158,9 @@ function medallionTexture() {
     g.closePath();
     g.fill();
   };
-  star(-Math.PI / 2, '#D4A017');
-  star(Math.PI / 2, '#0F5D4E');
+  // BUY half (tip toward the right/BUY pole) green, SELL half red
+  star(-Math.PI / 2, '#26A69A');
+  star(Math.PI / 2, '#EF5350');
   if (soft) g.filter = 'none';
   // gold outlines + centre boss
   g.lineJoin = 'round';

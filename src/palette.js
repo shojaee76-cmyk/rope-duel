@@ -1,18 +1,44 @@
-// THE ROPE DUEL — canonical palette (design_spec_cats_arena.md section 10).
-// Do not invent colors: every hex below comes from the spec.
+// THE ROPE DUEL — canonical palette.
+// FINANCIAL CONVENTION (user directive, task t_167a53f3): BUY = GREEN, SELL = RED.
+// The token names keep their original semantic slots so every consumer keeps
+// working — only the hex values that carry the side identity changed:
+//   Cat A = DON GATO  = BUY  side (right pole)  = GREEN cloth family on gold armour
+//   Cat B = SULTAN    = SELL side (left pole)   = CRIMSON cloth family on silver
+// Gold/silver/steel are armour neutrals; green/red are the team hues.
 export const CAT_A = {
   goldPrimary: '#D4A017', goldBright: '#F5C542', goldShadow: '#8C6A1D',
-  crimsonMain: '#A31621', crimsonDeep: '#7A0C14', leatherBrown: '#5C3A21',
+  // cloth family (cape, plume, tabard, doublet): was crimson, now BUY green
+  greenMain: '#1B7A4B', greenDeep: '#0E4A2C', leatherBrown: '#5C3A21',
   furWhite: '#F5F0E6', furGinger: '#C96A2B', furPatchShadow: '#A24E1B',
-  nosePink: '#E8A0A0', eyeAmber: '#FFB84D', steelBlade: '#C0C6CC', gemRuby: '#C22240'
+  nosePink: '#E8A0A0', eyeAmber: '#FFB84D', steelBlade: '#C0C6CC',
+  // pommel gem: was ruby, now emerald (was Cat B's gem before the flip)
+  gemEmerald: '#34D399',
+  // legacy aliases so any un-migrated reference still resolves to the SAME hue
+  crimsonMain: '#1B7A4B', crimsonDeep: '#0E4A2C', gemRuby: '#34D399'
 };
 
 export const CAT_B = {
-  emeraldMain: '#0F5D4E', emeraldBright: '#177F63', emeraldDeep: '#093D33',
+  // cloth family (robe trim, turban band, cuffs, placket): was emerald, now SELL red
+  redMain: '#A31621', redBright: '#C0392B', redDeep: '#7A0C14',
   silverMain: '#C9D1D9', silverBright: '#E8EDF2', silverShadow: '#8F98A3',
   clothWhite: '#F2EFE9', furCharcoal: '#2E2E38', furSilverStripe: '#9AA0AA',
-  furBelly: '#B9BFC7', eyeJade: '#7FD48A', noseBlack: '#1A1A22', gemEmerald: '#34D399',
-  steelBlade: '#C0C6CC'
+  furBelly: '#B9BFC7', eyeJade: '#FF8A80', noseBlack: '#1A1A22',
+  // pommel gem: was emerald, now ruby (was Cat A's gem before the flip)
+  gemRuby: '#C22240',
+  steelBlade: '#C0C6CC',
+  // legacy aliases so any un-migrated reference still resolves to the SAME hue
+  emeraldMain: '#A31621', emeraldBright: '#C0392B', emeraldDeep: '#7A0C14', gemEmerald: '#C22240'
+};
+
+// Side-level convenience tokens: the canonical BUY/SELL hues for lights, VFX,
+// pennants and anything that colours a SIDE rather than a material.
+export const SIDE = {
+  BUY: '#26A69A',       // buy green (same hue family as the up-tick flag/HUD)
+  BUY_BRIGHT: '#35D07F',
+  BUY_DEEP: '#0E4A2C',
+  SELL: '#EF5350',      // sell red (same hue family as the down-tick flag/HUD)
+  SELL_BRIGHT: '#FF8A80',
+  SELL_DEEP: '#7A0C14'
 };
 
 export const ARENA = {
@@ -22,6 +48,7 @@ export const ARENA = {
   tileBlue: '#1F5FA8', tileWhite: '#F2EFE9', tileEmerald: '#12755F',
   floorBase: '#D9CDB4', floorGrout: '#6E5A42',
   torchFlame: '#FF9D45', torchGlow: '#FFC97A', iron: '#3A3A40',
+  // price-flag fills: kept as the up/down hues (already the convention we want)
   flagUp: '#26A69A', flagDown: '#EF5350',
   ropeHemp: '#A67B4F', ropeFiber: '#8A6238',
   frieze: '#C9B389'

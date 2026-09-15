@@ -1,11 +1,18 @@
 # ⚔ THE ROPE DUEL — Live BTC/USDT Order-Flow Duel
 
-Two Andalusian cats — **DON GATO** (BUY pressure, gold) and **SULTAN BIGOTES**
-(SELL pressure, jade) — duel with swords on a suspended rope inside a moonlit
-Andalusian courtyard. The fight is driven by **real Binance BTC/USDT trades**:
-aggressive buy flow pushes Don Gato's attack, aggressive sell flow powers the
-Sultan's counter. The rope-slung flag shows the live price and the real 24h
-change; a gold/teal cat crowd cheers whichever side the order flow favors.
+Two Andalusian cats — **DON GATO** (BUY pressure, green cloth on gold armour)
+and **SULTAN BIGOTES** (SELL pressure, red cloth on silver) — duel with swords
+on a suspended rope inside a moonlit Andalusian courtyard. The fight is driven
+by **real Binance BTC/USDT trades**: aggressive buy flow pushes Don Gato's
+attack, aggressive sell flow powers the Sultan's counter. The rope-slung flag
+shows the live price and the real 24h change; a green/red cat crowd cheers
+whichever side the order flow favors.
+
+Color convention (task t_167a53f3): **BUY = GREEN, SELL = RED** — standard
+financial colors. The side hues are defined once in `src/palette.js` (CAT_A /
+CAT_B cloth tokens + the SIDE tokens) and in `index.html` (`--buy` / `--sell`
+CSS variables); every consumer (HUD meter, cat tags, callouts, crowd packs,
+pennants, medallion, rim lights, combat VFX) derives from those.
 
 Integrated site for kanban task **t_e2039773**, combining:
 
@@ -59,7 +66,7 @@ SIMULATION mode automatically (orange badge).
 | sustained pressure                    | cats lean with the flow; crowd hops on the gaining side  |
 
 HUD: big live price, real 24h change (+$abs) from the Binance ticker,
-trades/sec, sword-vs-sword pressure meter (gold right = BUY, teal left =
+trades/sec, sword-vs-sword pressure meter (green right = BUY, red left =
 SELL), BUY/SELL cat tags, connection badge (green OPEN = live,
 orange SIMULATION = fallback), `/ 24h` line painted on the rope flag.
 

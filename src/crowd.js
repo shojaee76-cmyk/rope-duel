@@ -45,8 +45,10 @@ function catSilhouetteTexture(fill, outline) {
   return t;
 }
 
-const BUY_TINTS = ['#F5C542', '#D4A017', '#B98A2A'];   // gold pack (right, BUY)
-const SELL_TINTS = ['#7FD48A', '#0F5D4E', '#3E7A5E'];  // jade pack (left, SELL)
+// Side tints follow the financial convention (task t_167a53f3): the BUY pack
+// (right side, Don Gato) is green, the SELL pack (left, Sultan) is red.
+const BUY_TINTS = ['#35D07F', '#26A69A', '#1B7A4B'];   // green pack (right, BUY)
+const SELL_TINTS = ['#EF5350', '#A31621', '#7A0C14'];  // red pack (left, SELL)
 
 function buildPack(scene, side, perRow, rows) {
   const group = new THREE.Group();

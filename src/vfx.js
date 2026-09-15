@@ -1,7 +1,8 @@
-// Combat VFX: gold sparks / embers for A, silver / jade / tile-tinted ghosts for B,
-// dust for stumbles, coin pop from the fountain (spec 7.3 VFX + section 8).
+// Combat VFX: green sparks / embers for A (BUY), silver / red ghosts for B
+// (SELL), dust for stumbles, coin pop from the fountain (spec 7.3 VFX + section
+// 8). Side hues follow the buy=green / sell=red convention (task t_167a53f3).
 import * as THREE from '../vendor/three.module.js';
-import { CAT_A, CAT_B, ARENA } from './palette.js';
+import { CAT_A, CAT_B, ARENA, SIDE } from './palette.js';
 import { canvasTexture } from './tex.js';
 
 // soft round spark sprite: square GL points read as "scattered squares" in
@@ -81,10 +82,12 @@ export class VFX {
   constructor(scene, scale = 1) {
     scale = Math.max(0.2, Math.min(1, scale));
     this.scene = scene;
-    this.sparksGold = new Pool(scene, { count: Math.round(150 * scale), size: 0.05, color: CAT_A.goldBright });
+    // side-colored pools: BUY (cat A) fights in green, SELL (cat B) in red;
+    // sparksSilver stays a neutral metal glint shared by both clashes
+    this.sparksGold = new Pool(scene, { count: Math.round(150 * scale), size: 0.05, color: SIDE.BUY_BRIGHT });
     this.sparksSilver = new Pool(scene, { count: Math.round(150 * scale), size: 0.05, color: CAT_B.silverBright });
     this.embers = new Pool(scene, { count: Math.round(60 * scale), size: 0.08, color: ARENA.torchFlame, gravity: 1.8, drag: 0.6, life: 1.4 });
-    this.jade = new Pool(scene, { count: Math.round(60 * scale), size: 0.06, color: CAT_B.eyeJade, gravity: -2.5 });
+    this.jade = new Pool(scene, { count: Math.round(60 * scale), size: 0.06, color: SIDE.SELL_BRIGHT, gravity: -2.5 });
     this.dust = new Pool(scene, { count: Math.round(80 * scale), size: 0.14, color: ARENA.floorBase, gravity: -1.2, drag: 2.5, life: 0.9 });
     this.dust.points.material.blending = THREE.NormalBlending;
     this.dust.points.material.opacity = 0.5;
@@ -99,8 +102,8 @@ export class VFX {
   }
   lungeSparks(p) { this.sparksGold.spawn(p.x, p.y, p.z, 2, 2, 10); }
   emberBurst(p) { this.embers.spawn(p.x, p.y, p.z, 1.2, 1.6, 14); }
-  ghost(p) { this.jade.spawn(p.x, p.y, p.z, 0.8, 0.6, 6, CAT_B.eyeJade); }
-  ghostTile(p) { this.jade.spawn(p.x, p.y, p.z, 0.8, 0.6, 6, '#12755F'); }
+  ghost(p) { this.jade.spawn(p.x, p.y, p.z, 0.8, 0.6, 6, SIDE.SELL_BRIGHT); }
+  ghostTile(p) { this.jade.spawn(p.x, p.y, p.z, 0.8, 0.6, 6, SIDE.SELL_DEEP); }
   dustBurst(p) { this.dust.spawn(p.x, p.y, p.z, 2.2, 1.8, 16); }
   furTuft(p) { this.fur.spawn(p.x, p.y, p.z, 0.6, 0.4, 5); }
   coinPop(p) { this.sparksGold.spawn(p.x, p.y, p.z, 1.5, 3.5, 8, '#B08D57'); }

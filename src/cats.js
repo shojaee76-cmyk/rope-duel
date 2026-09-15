@@ -262,7 +262,11 @@ function buildCape() {
   return cape;
 }
 
-// ---------- CAT A: DON GATO (local +x = facing; root yaw = PI -> faces world -x) ----------
+// ---------- CAT A: DON GATO (BUY side, RIGHT pole; local +x = facing; root yaw = PI -> faces world -x) ----------
+// CONVENTION (task t_167a53f3): BUY = GREEN. Don Gato keeps his gold armour
+// neutrals; every cloth piece (cape, plume, tabard, slashed doublet) now pulls
+// the BUY green family via CAT_A.crimsonMain/crimsonDeep aliases in palette.js
+// (names kept so the material slots stay stable; the HUES are green now).
 export function buildDonGato() {
   const rig = buildRig({
     // white Andalusian cat, warm cream patches over the coat
@@ -435,7 +439,11 @@ export function buildDonGato() {
   };
 }
 
-// ---------- CAT B: SULTAN BIGOTES (faces world +x) ----------
+// ---------- CAT B: SULTAN BIGOTES (SELL side, LEFT pole; faces world +x) ----------
+// CONVENTION (task t_167a53f3): SELL = RED. Sultan keeps his silver/white
+// neutrals (turban, dishdashah body, belt); every trim piece (turban band,
+// placket, cuffs, hem, scimitar grip) now pulls the SELL red family via the
+// CAT_B.emerald* aliases in palette.js; his eyes go red, his gem a ruby.
 export function buildSultanBigotes() {
   const rig = buildRig({
     // silver tabby: the material carries the LIGHT silver and the map darkens
@@ -471,7 +479,7 @@ export function buildSultanBigotes() {
     rig.tail[i].add(mesh(torus(0.04, 0.01), MB.stripe, 0, -0.065, 0));
   }
 
-  // turban: two-layer white wrap + emerald band + silver crescent pin
+  // turban: two-layer white wrap + SELL red band + silver crescent pin
   const turban = new THREE.Group();
   turban.position.set(0, 0.16, 0);
   turban.rotation.z = 0.08;
@@ -499,7 +507,7 @@ export function buildSultanBigotes() {
   // ---- DISHDASHAH: the long loose robe the Moslem cat wears ----
   // Body over the torso (attached to the spine so it leans with the chest),
   // flared skirt on the hips with an animated hem, starched pleated collar,
-  // front placket with buttons, wide sleeves, emerald trim on every edge.
+  // front placket with buttons, wide sleeves, SELL red trim on every edge.
   const linen = tex('cloth-linen', () => clothTexture({ seed: 55, weave: 11, thread: 'rgba(122,114,98,0.34)' }));
   const pleat = tex('pleat', () => pleatTexture({ pleats: 30 }));
   const dishMat = std(CAT_B.clothWhite, 'cloth', { side: THREE.DoubleSide, bumpScale: 0.05 }, linen);
@@ -528,7 +536,7 @@ export function buildSultanBigotes() {
   rig.hips.add(belt);
   rig.hips.add(mesh(sphere(0.032, 10, 8),
     std('#EAF2FF', 'goldBright', { emissive: '#BFD4FF', emissiveIntensity: 0.35 }), 0.228, 0.02, 0));
-  // wide sleeves (upper arm + forearm) with emerald cuffs
+  // wide sleeves (upper arm + forearm) with SELL red cuffs
   for (const side of ['L', 'R']) {
     const sleeve = mesh(new THREE.CylinderGeometry(0.082, 0.098, 0.3, 14, 1, true), dishMat, 0, -0.14, 0);
     rig.arms[side].shoulder.add(sleeve);

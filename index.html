@@ -7,8 +7,10 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23F7931A'/%3E%3Ctext x='16' y='23' font-size='18' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%237A4A08'%3EB%3C/text%3E%3C/svg%3E">
 <style>
   :root {
-    --gold: #F5C542; --gold-dim: #D4A017;
-    --jade: #7FD48A; --jade-dim: #0F5D4E;
+    --gold: #F5C542; --gold-dim: #D4A017;   /* brand accent (price, title) */
+    /* financial convention (task t_167a53f3): BUY = green, SELL = red */
+    --buy: #26A69A; --buy-bright: #35D07F; --buy-dim: #0E4A2C;
+    --sell: #EF5350; --sell-bright: #FF8A80; --sell-dim: #7A0C14;
     --up: #26A69A; --down: #EF5350;
     --ink: #EDE7D8; --ink-dim: #8f8fa8;
     --panel: rgba(8, 9, 22, 0.72);
@@ -44,17 +46,17 @@
     background: var(--panel); border: 1px solid var(--edge); border-radius: 13px;
     overflow: hidden; backdrop-filter: blur(6px); }
   #meter-buy { position: absolute; top: 0; bottom: 0; left: 50%;
-    background: linear-gradient(to right, var(--gold), rgba(245,197,66,0.15));
+    background: linear-gradient(to right, var(--buy-bright), rgba(38,166,154,0.15));
     width: 0%; transition: width 0.22s ease-out; }
   #meter-sell { position: absolute; top: 0; bottom: 0; right: 50%;
-    background: linear-gradient(to left, var(--jade-dim), rgba(127,212,138,0.15));
+    background: linear-gradient(to left, var(--sell-dim), rgba(239,83,80,0.15));
     width: 0%; transition: width 0.22s ease-out; }
   #meter-center { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
     margin-left: -1px; background: rgba(255,255,255,0.75); z-index: 2; }
   #meter-blah { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: space-between; padding: 0 10px; z-index: 3;
     font: 700 10px/1 "Consolas", monospace; letter-spacing: 0.1em; pointer-events: none; }
-  #meter-blah .b { color: var(--gold); } #meter-blah .s { color: var(--jade); }
+  #meter-blah .b { color: var(--buy-bright); } #meter-blah .s { color: var(--sell-bright); }
   .sword { font-size: 14px; filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); }
 
   /* ---------- cat labels ---------- */
@@ -64,8 +66,8 @@
     backdrop-filter: blur(6px); pointer-events: none; }
   .cat-tag small { display: block; font-weight: 400; font-size: 9px;
     color: var(--ink-dim); letter-spacing: 0.14em; }
-  #tag-buy { right: 16px; text-align: right; color: var(--gold); border-right: 3px solid var(--gold); }
-  #tag-sell { left: 16px; text-align: left; color: var(--jade); border-left: 3px solid var(--jade); }
+  #tag-buy { right: 16px; text-align: right; color: var(--buy-bright); border-right: 3px solid var(--buy-bright); }
+  #tag-sell { left: 16px; text-align: left; color: var(--sell-bright); border-left: 3px solid var(--sell-bright); }
 
   /* ---------- trade callouts ---------- */
   #callouts { position: fixed; inset: 0; z-index: 9; pointer-events: none; overflow: hidden; }
@@ -73,10 +75,10 @@
     font: 800 15px/1 "Consolas", monospace; padding: 5px 10px; border-radius: 8px;
     animation: callout-float 2.2s ease-out forwards; white-space: nowrap;
     text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
-  .callout.buy { color: #FFE08A; background: rgba(120,84,10,0.55);
-    border: 1px solid rgba(245,197,66,0.6); }
-  .callout.sell { color: #B8F0C4; background: rgba(9,61,51,0.55);
-    border: 1px solid rgba(127,212,138,0.6); }
+  .callout.buy { color: #A8F0D0; background: rgba(14,74,44,0.55);
+    border: 1px solid rgba(53,208,127,0.6); }
+  .callout.sell { color: #FFC9C4; background: rgba(122,12,20,0.55);
+    border: 1px solid rgba(239,83,80,0.6); }
   .callout .qty { font-weight: 400; font-size: 11px; opacity: 0.85; margin-left: 5px; }
   .callout.whale { font-size: 19px; animation: callout-float 2.6s ease-out forwards; }
   @keyframes callout-float {

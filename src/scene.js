@@ -9,7 +9,7 @@
 // tracks the live fight heat instead of only the pressure sign.
 // ============================================================
 import * as THREE from '../vendor/three.module.js';
-import { ARENA, DIM } from './palette.js';
+import { ARENA, DIM, SIDE } from './palette.js';
 import { VerletRope } from './rope.js';
 import { PriceFlag } from './flag.js';
 import { DuelCat } from './cats.js';
@@ -52,8 +52,10 @@ export function createDuelScene(container, opts = {}) {
   const ambient = new THREE.AmbientLight('#2A2438', 0.55);
   scene.add(ambient);
 
-  const rimA = new THREE.PointLight('#F5C542', 34, 7, 1.6);
-  const rimB = new THREE.PointLight('#7FD48A', 34, 7, 1.6);
+  // side rim lights follow the cats: BUY side glows green, SELL side red
+  // (financial convention flip, task t_167a53f3)
+  const rimA = new THREE.PointLight(SIDE.BUY_BRIGHT, 34, 7, 1.6);   // cat A = BUY
+  const rimB = new THREE.PointLight(SIDE.SELL_BRIGHT, 34, 7, 1.6);  // cat B = SELL
   scene.add(rimA, rimB);
 
   const fill = new THREE.SpotLight('#FFD9A0', 95, 26, 0.75, 0.6, 1.4);
@@ -195,6 +197,11 @@ export function createDuelScene(container, opts = {}) {
   let pressureWobbleTarget = 0;
   const hooksTrade = [];
 
+  // deterministic verification hook (tools/verify_colors.mjs): when armed, the
+  // demo tape stops, the director idles, and the pair is pinned to given x
+  // positions so screenshots are comparable frame to frame.
+  const freezeCtl = { armed: false, ax: 1.1, bx: -1.1 };
+
   const api = {
     setPressure(P) {
       demo.on = false;
@@ -262,7 +269,7 @@ export function createDuelScene(container, opts = {}) {
     frameCount++;
 
     // demo pressure/price when no live feed is driving the API
-    if (demo.on) {
+    if (demo.on && !freezeCtl.armed) {
       demo.t += dt;
       const P = Math.sin(demo.t * 0.4) * 0.8 + Math.sin(demo.t * 0.13) * 0.35 + Math.sin(demo.t * 1.7) * 0.12;
       director.setPressure(P);
@@ -277,6 +284,12 @@ export function createDuelScene(container, opts = {}) {
     }
 
     // physics + director + cats
+    if (freezeCtl.armed) {
+      // pinned pose: no director, no combat states, fixed cat positions
+      director.pressure = 0;
+      catA.setState('IDLE'); catB.setState('IDLE');
+      catA.x = freezeCtl.ax; catB.x = freezeCtl.bx;
+    }
     ctx.flagDart = false;
     ctx.circlePhase = director.circlePhase;
     ctx.pressureWobble += (pressureWobbleTarget - ctx.pressureWobble) * Math.min(1, dt * 5);
@@ -382,7 +395,14 @@ export function createDuelScene(container, opts = {}) {
 
   // debug/integration handle (used by tests and the root webpage task)
   if (opts.debug) {
-    window.__duelDebug = { rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, heat: () => heat };
+    window.__duelDebug = {
+      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade,
+      heat: () => heat,
+      freeze: (armed, ax = 1.1, bx = -1.1) => {
+        freezeCtl.armed = !!armed; freezeCtl.ax = ax; freezeCtl.bx = bx;
+        demo.on = false;
+      }
+    };
   }
 
   return api;
