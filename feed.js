@@ -49,10 +49,83 @@
   var SYMBOL = 'btcusdt';
 
   var DEFAULT_ENDPOINTS = [
-    { url: 'wss://data-stream.binance.vision/stream?streams=btcusdt@trade/btcusdt@ticker', label: 'binance.vision (combined trade+ticker)' },
-    { url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@trade/btcusdt@ticker', label: 'stream.binance.com:9443 (combined)' },
-    { url: 'wss://stream.binance.com:443/ws/btcusdt@trade', label: 'stream.binance.com:443 (trade)' }
+    { url: 'wss://data-stream.binance.vision/stream?streams=btcusdt@trade/btcusdt@ticker/btcusdt@kline_1s', label: 'binance.vision (trade+ticker+1s klines)' },
+    { url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@trade/btcusdt@ticker/btcusdt@kline_1s', label: 'stream.binance.com:9443 (trade+ticker+1s klines)' },
+    { url: 'wss://stream.binance.com:443/ws/btcusdt@trade', label: 'stream.binance.com:443 (trade only, candles from prints)' }
   ];
+
+  /* Candles: 1s BTCUSDT. History is seeded once from the public REST endpoint
+   * (ACAO *, flat weight 2), then kept live by @kline_1s ticks on the SAME
+   * socket (no second connection) plus every trade print (covers demo mode
+   * and trade-only endpoints). */
+  var MAX_CANDLES = 300; // 5 minutes of 1s tape
+  var KLINE_SEED_URL = 'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1s&limit=300';
+
+  function CandleStore(max) {
+    this.max = max || MAX_CANDLES;
+    this.rev = 0;          // bumped on every mutation; consumers redraw when it changes
+    this.seeded = false;   // REST history seed applied at least once
+    this.t = []; this.o = []; this.h = []; this.l = []; this.c = [];
+  }
+  CandleStore.prototype.lastT = function () {
+    return this.t.length ? this.t[this.t.length - 1] : -1;
+  };
+  CandleStore.prototype._append = function (t, o, h, l, c) {
+    this.t.push(t); this.o.push(o); this.h.push(h); this.l.push(l); this.c.push(c);
+    if (this.t.length > this.max) {
+      this.t.shift(); this.o.shift(); this.h.shift(); this.l.shift(); this.c.shift();
+    }
+    this.rev++;
+  };
+  /* Trade print: same-second slot updates h/l/c (open stays the FIRST print),
+   * a newer second opens a new slot, older prints are dropped. */
+  CandleStore.prototype.ingestTrade = function (ts, price) {
+    if (!isFinite(price)) return;
+    var sec = Math.floor(ts / 1000) * 1000;
+    var n = this.t.length;
+    if (n && sec === this.t[n - 1]) {
+      var i = n - 1;
+      if (price > this.h[i]) this.h[i] = price;
+      if (price < this.l[i]) this.l[i] = price;
+      this.c[i] = price;
+      this.rev++;
+      return;
+    }
+    if (sec <= this.lastT()) return;
+    this._append(sec, price, price, price, price);
+  };
+  /* @kline_1s tick (interim x:false AND final x:true): upsert by candle time,
+   * all four values authoritative from the exchange. */
+  CandleStore.prototype.ingestKline = function (t, o, h, l, c) {
+    if (!isFinite(t) || !isFinite(o) || !isFinite(h) || !isFinite(l) || !isFinite(c)) return;
+    var n = this.t.length;
+    if (n && t === this.t[n - 1]) {
+      this.o[n - 1] = o; this.h[n - 1] = h; this.l[n - 1] = l; this.c[n - 1] = c;
+      this.rev++;
+      return;
+    }
+    if (t < this.lastT()) return;
+    this._append(t, o, h, l, c);
+  };
+  /* REST seed rows: ascending [openTime, open, high, low, close, ...] strings.
+   * Rows at/below the newest socket candle are skipped (live data wins). */
+  CandleStore.prototype.seedRows = function (rows) {
+    if (!Array.isArray(rows)) return;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!Array.isArray(r) || r.length < 5) continue;
+      var t = +r[0], o = +r[1], h = +r[2], l = +r[3], c = +r[4];
+      if (!isFinite(t) || !isFinite(c)) continue;
+      if (t <= this.lastT()) continue;
+      this._append(t, o, h, l, c);
+    }
+    this.seeded = true;
+    this.rev++;
+  };
+  CandleStore.prototype.snapshot = function () {
+    return { rev: this.rev, seeded: this.seeded, count: this.t.length,
+             t: this.t, o: this.o, h: this.h, l: this.l, c: this.c };
+  };
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -162,6 +235,8 @@
     this.demoStartPrice = opts.demoStartPrice || 78000;
     this.priceDecimals = opts.priceDecimals !== undefined ? opts.priceDecimals : 2;
     this._acc = new PressureAccumulator(opts);
+    this._candles = new CandleStore(opts.maxCandles);
+    this._seedStarted = false;   // one REST history fetch per feed instance
     this._demo = null;
     this._ws = null;
     this._running = false;
@@ -195,6 +270,8 @@
   BtcTradeFeed.VERSION = VERSION;
   BtcTradeFeed.DEFAULT_ENDPOINTS = DEFAULT_ENDPOINTS;
   BtcTradeFeed.PressureAccumulator = PressureAccumulator;
+  BtcTradeFeed.CandleStore = CandleStore;
+  BtcTradeFeed.KLINE_SEED_URL = KLINE_SEED_URL;
   BtcTradeFeed.DemoSource = DemoSource;
 
   /* ---------- listeners ---------- */
@@ -254,6 +331,20 @@
       this._connect();
     }
     this._emitTimer = setInterval(this._tick.bind(this), this.emitIntervalMs);
+    this._seedCandles();
+  };
+
+  /* One REST history fetch per instance (flat weight 2, ACAO *). Failure is
+   * harmless: the socket keeps building candles from live ticks, and demo
+   * mode builds its own tape. Never re-fetched on stop()/start(). */
+  BtcTradeFeed.prototype._seedCandles = function () {
+    if (this._seedStarted) return;
+    this._seedStarted = true;
+    var store = this._candles;
+    fetch(KLINE_SEED_URL, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) { store.seedRows(rows); })
+      .catch(function () { /* offline seed — live/demo ticks still fill it */ });
   };
 
   BtcTradeFeed.prototype.stop = function () {
@@ -375,11 +466,15 @@
       if (isFinite(hi)) this._high24h = hi;
       var lo = parseFloat(msg.l);
       if (isFinite(lo)) this._low24h = lo;
+    } else if (msg.e === 'kline') {
+      var k = msg.k;
+      if (k) this._candles.ingestKline(+k.t, +k.o, +k.h, +k.l, +k.c);
     }
   };
 
   BtcTradeFeed.prototype._ingestTrade = function (t) {
     this._acc.push(t);
+    this._candles.ingestTrade(t.ts, t.price);
     this._price = t.price;
     this._lastSide = t.side;
     this._lastQty = t.qty;
@@ -419,6 +514,11 @@
   };
 
   /* ---------- public getters ---------- */
+  /* 1s candle store for the chart (REST-seeded, socket + trade fed). */
+  BtcTradeFeed.prototype.candles = function () {
+    return this._candles.snapshot();
+  };
+
   BtcTradeFeed.prototype.snap = function () {
     return {
       ts: Date.now(),

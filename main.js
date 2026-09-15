@@ -7,6 +7,7 @@
 //              ?nofx=1               (reduce particles, for weak devices)
 import { createDuelScene } from './src/scene.js';
 import { wireFeedToScene } from './feed-adapter.js';
+import { createDuelChart } from './src/chart.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
@@ -39,6 +40,13 @@ const meterBuy = $('meter-buy'), meterSell = $('meter-sell');
 const dotEl = $('status-dot'), modeEl = $('status-mode');
 const calloutLayer = $('callouts');
 
+/* ---------- embedded live chart (task t_189fb722) ----------
+   Panel markup lives in index.html (#chart-panel), styles in chart.css.
+   Fed below: handleState -> candle snapshots + price (~4 Hz, the feed's own
+   throttle), setStatus -> LIVE/RECONNECTING/SIM chip, spawnCallout -> dots
+   for callout-worthy trades ($50k+). */
+const chart = createDuelChart($('chart-panel'));
+
 function fmtUsd(v) {
   if (v == null || !isFinite(v)) return '—';
   if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
@@ -56,6 +64,7 @@ function spawnCallout(info) {
     calloutLayer.firstElementChild.remove();
   }
   const whale = info.notional >= WHALE_MIN;
+  chart.trade(info); // dot on the embedded chart at the trade price
   const el = document.createElement('div');
   el.className = `callout ${info.side}${whale ? ' whale' : ''}`;
   el.textContent = `${info.side === 'buy' ? '+BUY' : '-SELL'} $${fmtUsd(info.notional)}`;
@@ -82,6 +91,7 @@ function setStatus(st) {
   const isDemo = st.mode === 'demo' || st.status === 'demo';
   dotEl.className = isDemo ? 'demo' : (st.status === 'open' ? 'live' : (st.status || ''));
   modeEl.textContent = isDemo ? 'SIMULATION' : (st.status || '').toUpperCase();
+  chart.notifyStatus(st); // chart chip mirrors the feed lifecycle instantly
 }
 
 const unwire = wireFeedToScene(feed, scene, {
@@ -91,6 +101,8 @@ const unwire = wireFeedToScene(feed, scene, {
 });
 
 function handleState(s) {
+    // embedded chart: candle store snapshot + latest meta (rev-gated redraw)
+    chart.update(feed.candles(), s);
     // big HUD price
     priceEl.textContent = s.price
       ? s.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -118,4 +130,4 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- dev harness (verify_*.mjs drives this) ---------- */
-window.__duelPage = { feed, scene, unwire, handleState };
+window.__duelPage = { feed, scene, unwire, handleState, chart };

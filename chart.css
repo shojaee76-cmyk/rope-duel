@@ -1,0 +1,99 @@
+/* chart.css — embedded live chart panel for THE ROPE DUEL (t_189fb722).
+   Reads the same tokens as the HUD (--panel/--edge/--gold/--ink-dim/--up/--down),
+   so theme changes (incl. the buy/sell color flip) propagate automatically. */
+
+#chart-panel {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  width: min(94vw, 560px);
+  height: 138px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  transition: height 0.22s ease-out;
+}
+/* desktop micro-interaction: hover to inspect more tape */
+@media (pointer: fine) {
+  #chart-panel:hover { height: 188px; }
+}
+
+#chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 4px;
+  flex: 0 0 auto;
+}
+#chart-title {
+  font: 700 9px/1.2 "Consolas", "Courier New", monospace;
+  letter-spacing: 0.14em;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#chart-title b { color: var(--gold); font-weight: 700; }
+
+#chart-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 700 9px/1 "Consolas", monospace;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+#chart-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #666;
+  box-shadow: 0 0 6px transparent;
+  transition: background 0.3s;
+}
+#chart-chip.live::before { background: #35D07F; box-shadow: 0 0 6px #35D07F; animation: chart-pulse 2s infinite; }
+#chart-chip.demo::before { background: #F5A623; box-shadow: 0 0 6px #F5A623; }
+#chart-chip.stale::before { background: #F5A623; box-shadow: 0 0 6px #F5A623; animation: chart-pulse 1s infinite; }
+#chart-chip.off::before { background: #999; }
+#chart-chip.load::before { background: #F5C542; animation: chart-pulse 1.4s infinite; }
+#chart-chip.live { color: #9FE8C0; }
+#chart-chip.stale, #chart-chip.demo { color: #F5C98A; }
+@keyframes chart-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+#chart-canvas {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: block;
+  cursor: crosshair;
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 640px) {
+  #chart-panel {
+    width: 94vw;
+    height: 108px;
+    bottom: 52px; /* sits above the cat tags */
+  }
+  #chart-head { padding: 4px 8px 2px; }
+  #chart-title { letter-spacing: 0.08em; }
+}
+@media (max-width: 420px) {
+  #chart-panel { height: 96px; }
+}
+@media (max-height: 520px) {
+  /* very short viewports: keep the duel the hero, shrink the panel */
+  #chart-panel { height: 84px; bottom: 46px; }
+}
