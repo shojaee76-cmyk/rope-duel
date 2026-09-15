@@ -124,7 +124,17 @@ const feed = new window.BtcTradeFeed(feedOpts);
 function setStatus(st) {
   const isDemo = st.mode === 'demo' || st.status === 'demo';
   dotEl.className = isDemo ? 'demo' : (st.status === 'open' ? 'live' : (st.status || ''));
-  modeEl.textContent = isDemo ? 'SIMULATION' : (st.status || '').toUpperCase();
+  /* Name the actual market-data source while live. The feed can run on
+   * Binance or on its Bybit fallback (see feed.js: bybit answers on networks
+   * where every binance host is geo-blocked), and an unlabelled provider
+   * switch is exactly what makes a "live" feed impossible to trust. */
+  const src = (!isDemo && st.status === 'open' && st.providerLabel)
+    ? ' \u00b7 ' + st.providerLabel.toUpperCase() : '';
+  /* Socket state names are engineer-speak; the badge says what the viewer
+   * needs to know. 'open' is simply LIVE (same word the chart chip uses). */
+  const STATUS_TEXT = { open: 'LIVE', connecting: 'CONNECTING', backoff: 'RECONNECTING', stopped: 'OFFLINE' };
+  const label = isDemo ? 'SIMULATION' : (STATUS_TEXT[st.status] || (st.status || '').toUpperCase());
+  modeEl.textContent = label + src;
   chart.notifyStatus(st); // chart chip mirrors the feed lifecycle instantly
 }
 

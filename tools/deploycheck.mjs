@@ -1,37 +1,45 @@
-// tools/deploycheck.mjs — verify the DEPLOYED GitHub Pages build serves the
-// chart bundle: sha256 equal to local, page boots, chart panel paints.
-// Retries the fetch for up to ~5 min (Pages rebuild lag), then runs the
-// headless pass. Live-tape assertions are intentionally omitted: the sandbox's
-// Binance egress flaps (451/ECONNREFUSED), so demo fallback (SIM TAPE) is an
-// equally valid outcome for the deployed page.
+// tools/deploycheck.mjs: verify the DEPLOYED GitHub Pages build end to end:
+//   1. EVERY file the page loads (index.html, feed.js, bundle.js, chart.css)
+//      byte-matches the local copy, not just the bundle. feed.js is a separate
+//      script tag, so a bundle-only hash check would silently pass a stale feed.
+//   2. the deployed page boots, the chart paints, and the LIVE path actually
+//      works from this network: the HUD must advertise a real provider
+//      (LIVE . BINANCE | LIVE . BYBIT) and its price must agree with an
+//      independent REST ticker for that provider.
+// Retries the hash fetch for up to ~5 min (Pages rebuild lag).
 import { chromium } from 'playwright-core';
 import { existsSync } from 'fs';
 import { createHash } from 'crypto';
-import http from 'http';
 import { readFile } from 'fs/promises';
 import path from 'path';
 
 const root = 'C:/Users/capit/rope-duel';
-const LIVE = 'https://shojaee76-cmyk.github.io/rope-duel/bundle.js';
-const localSha = createHash('sha256').update(await readFile(path.join(root, 'bundle.js'))).digest('hex');
-console.log('local bundle sha256:', localSha);
+const BASE = 'https://shojaee76-cmyk.github.io/rope-duel/';
 
-let liveSha = null;
-for (let i = 0; i < 15; i++) {
-  try {
-    const r = await fetch(LIVE + '?bust=' + Date.now(), { signal: AbortSignal.timeout(15000) });
-    if (r.ok) {
-      liveSha = createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex');
-      if (liveSha === localSha) break;
-      console.log(`attempt ${i + 1}: live bundle differs (${liveSha.slice(0, 8)}…) — Pages still rebuilding`);
-    } else console.log(`attempt ${i + 1}: HTTP ${r.status}`);
-  } catch (e) { console.log(`attempt ${i + 1}: ${e.cause ? e.cause.code || e.cause.message : e.message}`); }
-  await new Promise((r) => setTimeout(r, 20000));
+const FILES = ['index.html', 'feed.js', 'bundle.js', 'chart.css'];
+const local = {};
+for (const f of FILES) local[f] = createHash('sha256').update(await readFile(path.join(root, f))).digest('hex');
+
+let pending = new Set(FILES);
+for (let i = 0; i < 15 && pending.size; i++) {
+  for (const f of [...pending]) {
+    try {
+      const r = await fetch(BASE + f + '?bust=' + Date.now(), { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { console.log(`attempt ${i + 1}: ${f} HTTP ${r.status}`); continue; }
+      const sha = createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex');
+      if (sha === local[f]) {
+        console.log(`PASS  ${f} sha256 == local (${sha.slice(0, 12)})`);
+        pending.delete(f);
+      } else {
+        console.log(`attempt ${i + 1}: ${f} differs (${sha.slice(0, 8)}...) - Pages still rebuilding`);
+      }
+    } catch (e) { console.log(`attempt ${i + 1}: ${f} ${e.cause ? e.cause.code || e.cause.message : e.message}`); }
+  }
+  if (pending.size) await new Promise((r) => setTimeout(r, 20000));
 }
-if (liveSha !== localSha) { console.log('FAIL: live bundle never matched local'); process.exit(1); }
-console.log('PASS  live bundle sha256 == local (deploy propagated)');
+if (pending.size) { console.log('FAIL: deployed files never matched local: ' + [...pending].join(', ')); process.exit(1); }
 
-/* headless pass on the deployed page */
+/* ---------- headless pass on the deployed page ---------- */
 const cands = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -43,31 +51,65 @@ const page = await b.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = [];
 page.on('pageerror', (e) => errs.push('pageerror: ' + (e.stack || e.message).split('\n')[0]));
 page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
-await page.goto('https://shojaee76-cmyk.github.io/rope-duel/?seed=7', { waitUntil: 'load', timeout: 45000 });
-await page.waitForTimeout(8000);
+
+await page.goto(BASE + '?cb=' + Date.now(), { waitUntil: 'load', timeout: 45000 });
+await page.waitForFunction(
+  () => window.__duelPage && window.__duelPage.feed && window.__duelPage.feed.snap().status === 'open',
+  { timeout: 45000 }
+).catch(() => {});
+await page.waitForFunction(
+  () => { const f = window.__duelPage && window.__duelPage.feed; return !!f && f.candles().seeded === true; },
+  { timeout: 45000 }
+).catch(() => {});
+await page.waitForTimeout(4000);
 
 const s = await page.evaluate(() => {
   const cv = document.getElementById('chart-canvas');
   const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
   let painted = 0;
   for (let i = 3; i < d.length; i += 16) if (d[i] > 0) painted++;
-  const st = window.__duelPage.feed.state();
+  const f = window.__duelPage.feed;
+  const st = f.snap();
   return {
     painted,
     chip: document.getElementById('chart-chip').className,
     chipText: document.getElementById('chart-chip-text').textContent,
-    feedMode: st.mode, feedStatus: st.status,
+    feedMode: st.mode, feedStatus: st.status, provider: st.provider,
     hudPrice: document.getElementById('price').textContent,
-    hasChart: !!window.__duelPage.chart,
+    statusText: document.getElementById('status-mode').textContent,
+    price: st.price, candles: f.candles().count, seeded: f.candles().seeded,
+    hasChart: !!window.__duelPage.chart
   };
 });
+
+let ref = null;
+try {
+  const url = s.provider === 'bybit'
+    ? 'https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT'
+    : 'https://data-api.binance.vision/api/v3/ticker/24hr?symbol=BTCUSDT';
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const j = await r.json();
+  ref = s.provider === 'bybit' ? +j.result.list[0].lastPrice : +j.lastPrice;
+} catch (e) { /* cross-check is best-effort */ }
+
 let fails = 0;
-const ck = (name, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`); if (!ok) fails++; };
+const ck = (name, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`); if (!ok) fails++; };
 ck('[deploy] chart module wired', s.hasChart, 'window.__duelPage.chart');
 ck('[deploy] chart panel painted', s.painted > 50, `${s.painted} px`);
-ck('[deploy] chip consistent with feed mode', (s.feedMode === 'live' && s.chip === 'live') || (s.feedMode === 'demo' && (s.chip === 'demo' || s.chip === 'load')), `${s.chip} "${s.chipText}" mode=${s.feedMode}`);
+ck('[deploy] feed is LIVE (not the SIMULATION tape)', s.feedMode === 'live' && s.feedStatus === 'open', `mode=${s.feedMode} status=${s.feedStatus}`);
+ck('[deploy] HUD names the real provider', /^LIVE \u00b7 (BINANCE|BYBIT)$/.test(s.statusText.trim()), JSON.stringify(s.statusText));
+ck('[deploy] chart chip reads LIVE', s.chip === 'live' && s.chipText === 'LIVE', `${s.chip} "${s.chipText}"`);
+ck('[deploy] REST history seed applied', s.seeded === true && s.candles >= 60, `seeded=${s.seeded} candles=${s.candles}`);
 ck('[deploy] HUD price present', /\d/.test(s.hudPrice), s.hudPrice);
-ck('[deploy] zero page errors (WebSocket 451 from this sandbox is environmental)', errs.filter((e) => !/451|ERR_CONNECTION_REFUSED/.test(e)).length === 0, errs.slice(0, 3).join(' | ') || 'clean');
+if (ref) {
+  const dev = Math.abs(s.price - ref) / ref;
+  ck(`[deploy] price agrees with independent ${s.provider} ticker (<0.5%)`, dev < 0.005, `page=${s.price} ref=${ref} dev=${(dev * 100).toFixed(3)}%`);
+} else {
+  console.log('WARN  independent ticker unavailable, price cross-check skipped');
+}
+ck('[deploy] zero page errors (WebSocket handshake noise excluded)',
+  errs.filter((e) => !/451|403|ERR_CONNECTION_REFUSED|WebSocket|Failed to load resource/.test(e)).length === 0,
+  errs.slice(0, 3).join(' | ') || 'clean');
 await page.screenshot({ path: path.join(root, 'tools/shots/deployed_live.png') });
 await b.close();
 console.log(fails ? `\n${fails} FAILED` : '\nDEPLOY VERIFIED');

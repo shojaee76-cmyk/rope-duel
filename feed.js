@@ -1,5 +1,5 @@
 /*!
- * btc-feed.js v1.0.0 — standalone live BTC/USDT trade feed (Binance WebSocket)
+ * btc-feed.js v1.1.0 - standalone live BTC/USDT trade feed (multi-provider WS)
  * ---------------------------------------------------------------------------
  * Zero dependencies, UMD (browser global `BtcTradeFeed` + CommonJS).
  *
@@ -13,13 +13,26 @@
  *   m === true  -> seller was taker -> AGGRESSIVE SELL (pressure -)
  * `p` (price) and `q` (qty) arrive as strings -> parsed with parseFloat.
  *
- * Endpoints (all verified live, tried in order with rotation on failure):
- *   1. wss://data-stream.binance.vision/...  market-data-only mirror,
- *      least likely to hit regional restrictions -> default
- *   2. wss://stream.binance.com:9443/stream?streams=...  combined stream
- *   3. wss://stream.binance.com:443/ws/...   port-443 firewall-friendly twin
- * Combined `/stream?streams=` payloads are wrapped as
+ * Endpoints (all verified live, tried in order with rotation on failure).
+ * Every endpoint declares a PROVIDER ('binance' | 'bybit') and the frame
+ * parser is chosen from it, so exactly ONE socket is ever open:
+ *   1. wss://data-stream.binance.vision/...   market mirror (native 1s klines)
+ *   2. wss://stream.bybit.com/v5/public/spot  Bybit v5 (explicit subscribe)
+ *   3. wss://stream.binance.com:9443/stream?streams=...  combined stream
+ *   4. wss://stream.binance.com:443/ws/...    trade only, port-443 twin
+ * Binance combined `/stream?streams=` payloads are wrapped as
  * {stream:"...", data:{...}} -> unwrapped internally before parsing.
+ * Bybit frames carry `topic` + `data` and need a subscribe frame after open;
+ * its payloads are normalized to the same internal trade/price shape.
+ *
+ * WHY BYBIT SITS SECOND AND NOT LAST: Binance geo-blocks sanctioned regions
+ * (HTTP 451 on REST, non-101 on WS) and ALL of its mirrors fail together, so
+ * a mirrors-first rotation burns the entire demo-fallback budget before it
+ * ever reaches a host that answers. Bybit streams fine from those same lines
+ * (measured from an Iranian line: Binance WS refused, Bybit OPEN, ~12
+ * trades/s, and its REST sends access-control-allow-origin echoing the page
+ * origin). A client where binance.vision works still connects on attempt one
+ * and never touches attempt two.
  *
  * Modes:
  *   'live'  real Binance feed, exponential-backoff reconnect on drop
@@ -45,14 +58,16 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var SYMBOL = 'btcusdt';
 
   var DEFAULT_ENDPOINTS = [
-    { url: 'wss://data-stream.binance.vision/stream?streams=btcusdt@trade/btcusdt@ticker/btcusdt@kline_1s', label: 'binance.vision (trade+ticker+1s klines)' },
-    { url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@trade/btcusdt@ticker/btcusdt@kline_1s', label: 'stream.binance.com:9443 (trade+ticker+1s klines)' },
-    { url: 'wss://stream.binance.com:443/ws/btcusdt@trade', label: 'stream.binance.com:443 (trade only, candles from prints)' }
+    { kind: 'binance', url: 'wss://data-stream.binance.vision/stream?streams=btcusdt@trade/btcusdt@ticker/btcusdt@kline_1s', label: 'binance.vision (trade+ticker+1s klines)' },
+    { kind: 'bybit', url: 'wss://stream.bybit.com/v5/public/spot', label: 'bybit spot (trade+ticker; answers where binance is geo-blocked)' },
+    { kind: 'binance', url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@trade/btcusdt@ticker/btcusdt@kline_1s', label: 'stream.binance.com:9443 (trade+ticker+1s klines)' },
+    { kind: 'binance', url: 'wss://stream.binance.com:443/ws/btcusdt@trade', label: 'stream.binance.com:443 (trade only, candles from prints)' }
   ];
+  var PROVIDER_LABELS = { binance: 'Binance', bybit: 'Bybit' };
 
   /* Candles: 1s BTCUSDT. History is seeded once from the public REST endpoint
    * (ACAO *, flat weight 2), then kept live by @kline_1s ticks on the SAME
@@ -60,6 +75,12 @@
    * and trade-only endpoints). */
   var MAX_CANDLES = 300; // 5 minutes of 1s tape
   var KLINE_SEED_URL = 'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1s&limit=300';
+  /* Bybit's finest kline interval is 1m, so its chart history is seeded from
+   * the recent-trade tape instead and folded into 1s buckets by
+   * CandleStore.ingestTrade, exactly like the live prints do. limit=1000 is
+   * roughly 60-90 s of BTCUSDT history at the observed ~12 trades/s. */
+  var BYBIT_SEED_URL = 'https://api.bybit.com/v5/market/recent-trade?category=spot&symbol=BTCUSDT&limit=1000';
+  var BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/spot';
 
   function CandleStore(max) {
     this.max = max || MAX_CANDLES;
@@ -122,6 +143,43 @@
     this.seeded = true;
     this.rev++;
   };
+  /* {t,o,h,l,c} backfill for a REST history that arrives AFTER the socket is
+   * already delivering prints (the normal case: the handshake wins the race
+   * against the REST round-trip). seedRows() above deliberately drops rows at
+   * or below the newest live slot, which is correct for a pre-connect seed but
+   * throws away the entire history here. seedHistory instead:
+   *   - rows OLDER than the first live slot are prepended (history fills left)
+   *   - rows NEWER than the last live slot are appended
+   *   - rows that fall inside the live range are left alone (live wins)
+   * Rows must be ascending by time (both providers are normalized to that). */
+  CandleStore.prototype.seedHistory = function (rows) {
+    if (!Array.isArray(rows) || !rows.length) return;
+    var pre = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!Array.isArray(r) || r.length < 5) continue;
+      var t = +r[0], o = +r[1], h = +r[2], l = +r[3], c = +r[4];
+      if (!isFinite(t) || !isFinite(c)) continue;
+      if (!this.t.length || t < this.t[0]) pre.push([t, o, h, l, c]);
+      else if (t > this.lastT()) this._append(t, o, h, l, c);
+    }
+    if (pre.length) this._prepend(pre);
+    this.seeded = true;
+    this.rev++;
+  };
+  CandleStore.prototype._prepend = function (asc) {
+    for (var i = asc.length - 1; i >= 0; i--) {
+      var r = asc[i];
+      this.t.unshift(r[0]); this.o.unshift(r[1]); this.h.unshift(r[2]);
+      this.l.unshift(r[3]); this.c.unshift(r[4]);
+    }
+    var over = this.t.length - this.max;
+    if (over > 0) {
+      this.t.splice(0, over); this.o.splice(0, over); this.h.splice(0, over);
+      this.l.splice(0, over); this.c.splice(0, over);
+    }
+  };
+
   CandleStore.prototype.snapshot = function () {
     return { rev: this.rev, seeded: this.seeded, count: this.t.length,
              t: this.t, o: this.o, h: this.h, l: this.l, c: this.c };
@@ -230,6 +288,7 @@
     this.backoffBaseMs = opts.backoffBaseMs || 1000;
     this.backoffMaxMs = opts.backoffMaxMs || 15000;
     this.demoFallbackAfter = opts.demoFallbackAfter || 2; // failed attempts -> demo (auto mode)
+    this.connectTimeoutMs = opts.connectTimeoutMs || 8000; // per-attempt handshake cap
     this.liveRetryMs = opts.liveRetryMs || 60000;          // auto-heal retry period
     this.demoSeed = opts.demoSeed;
     this.demoStartPrice = opts.demoStartPrice || 78000;
@@ -237,6 +296,10 @@
     this._acc = new PressureAccumulator(opts);
     this._candles = new CandleStore(opts.maxCandles);
     this._seedStarted = false;   // one REST history fetch per feed instance
+    this._kind = (this.endpoints[0] && this.endpoints[0].kind) || 'binance';
+    this._bsym = this.symbol.toUpperCase();  // Bybit symbols are upper-case
+    this._connectTimer = null;   // handshake watchdog for the current attempt
+    this._lastPing = 0;          // Bybit app-level keepalive
     this._demo = null;
     this._ws = null;
     this._running = false;
@@ -272,6 +335,9 @@
   BtcTradeFeed.PressureAccumulator = PressureAccumulator;
   BtcTradeFeed.CandleStore = CandleStore;
   BtcTradeFeed.KLINE_SEED_URL = KLINE_SEED_URL;
+  BtcTradeFeed.BYBIT_SEED_URL = BYBIT_SEED_URL;
+  BtcTradeFeed.BYBIT_WS_URL = BYBIT_WS_URL;
+  BtcTradeFeed.PROVIDER_LABELS = PROVIDER_LABELS;
   BtcTradeFeed.DemoSource = DemoSource;
 
   /* ---------- listeners ---------- */
@@ -302,6 +368,8 @@
       status: status,
       mode: this.effectiveMode(),
       endpoint: this._endpoint(),
+      provider: this._kind,
+      providerLabel: PROVIDER_LABELS[this._kind] || this._kind,
       attempt: this._attempt,
       detail: detail || null,
       lastError: this._lastError,
@@ -331,23 +399,51 @@
       this._connect();
     }
     this._emitTimer = setInterval(this._tick.bind(this), this.emitIntervalMs);
-    this._seedCandles();
+    /* NOTE: the REST history seed now runs on the FIRST successful handshake
+     * (see _seedProvider) instead of at start(), so a provider that is
+     * geo-blocked never gets a wasted cross-origin request. */
   };
 
-  /* One REST history fetch per instance (flat weight 2, ACAO *). Failure is
-   * harmless: the socket keeps building candles from live ticks, and demo
-   * mode builds its own tape. Never re-fetched on stop()/start().
-   * Pure demo mode skips the fetch entirely — the synthetic tape builds its
+  /* One REST history fetch per instance, for whichever provider actually
+   * answered (both send permissive CORS headers). Failure is harmless: the
+   * socket keeps building candles from live ticks, and demo mode builds its
+   * own tape. Never re-fetched on stop()/start().
+   * Pure demo mode skips the fetch entirely: the synthetic tape builds its
    * own candle history and the page must boot with zero network noise. */
-  BtcTradeFeed.prototype._seedCandles = function () {
+  function seedBinance(feed) {
+    return fetch(KLINE_SEED_URL, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) { feed._candles.seedHistory(rows); });
+  }
+  function seedBybit(feed) {
+    return fetch(BYBIT_SEED_URL, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        var list = j && j.result && j.result.list;
+        if (!Array.isArray(list)) return;
+        // Bybit returns newest-first; ingestTrade requires ascending order
+        var rows = [];
+        for (var i = list.length - 1; i >= 0; i--) {
+          var tr = list[i];
+          var ts = +tr.time, price = parseFloat(tr.price);
+          if (!isFinite(ts) || !isFinite(price)) continue;
+          // OHLC of a print-only bucket is the print itself
+          rows.push([ts, price, price, price, price]);
+        }
+        feed._candles.seedHistory(rows);
+      });
+  }
+  var SEEDS = { binance: seedBinance, bybit: seedBybit };
+
+  BtcTradeFeed.prototype._seedProvider = function (kind) {
     if (this._seedStarted) return;
     if (this.mode === 'demo') return;
+    var seed = SEEDS[kind || 'binance'];
+    if (!seed) return;
     this._seedStarted = true;
-    var store = this._candles;
-    fetch(KLINE_SEED_URL, { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (rows) { store.seedRows(rows); })
-      .catch(function () { /* offline seed — live/demo ticks still fill it */ });
+    try {
+      seed(this).catch(function () { /* offline seed: live ticks still fill it */ });
+    } catch (e) { /* fetch unavailable in this runtime */ }
   };
 
   BtcTradeFeed.prototype.stop = function () {
@@ -356,6 +452,8 @@
     if (this._emitTimer) { clearInterval(this._emitTimer); this._emitTimer = null; }
     if (this._backoffTimer) { clearTimeout(this._backoffTimer); this._backoffTimer = null; }
     if (this._liveRetryTimer) { clearTimeout(this._liveRetryTimer); this._liveRetryTimer = null; }
+    if (this._connectTimer) { clearTimeout(this._connectTimer); this._connectTimer = null; }
+    this._lastPing = 0;
     this._stopDemo();
     if (this._ws) {
       try { this._ws.close(); } catch (e) { /* already gone */ }
@@ -393,20 +491,46 @@
   BtcTradeFeed.prototype._connect = function () {
     if (!this._running || this._ws) return;
     var self = this;
-    var url = this._endpoint();
+    var ep = this.endpoints[this._endpointIdx % this.endpoints.length] || {};
+    var url = ep.url;
+    this._kind = ep.kind || 'binance';       // selects the frame parser
     this._setStatus(this._attempt > 0 ? 'backoff' : 'connecting');
     var ws;
     try { ws = new WebSocket(url); }
     catch (e) { this._lastError = String(e); return this._onSocketDead(false); }
     this._ws = ws;
 
+    /* Handshake watchdog: a blocked or black-holed host can leave a socket
+     * half-open indefinitely, which would stall the rotation before it ever
+     * reaches a provider that answers. Closing here lets onclose drive the
+     * normal rotation path, so there is exactly one code path for failure. */
+    if (this._connectTimer) clearTimeout(this._connectTimer);
+    this._connectTimer = setTimeout(function () {
+      self._connectTimer = null;
+      if (self._ws === ws) { try { ws.close(); } catch (e) { /* already dead */ } }
+    }, this.connectTimeoutMs);
+
     ws.onopen = function () {
       if (self._ws !== ws) return;           // stale socket
+      if (self._connectTimer) { clearTimeout(self._connectTimer); self._connectTimer = null; }
+      /* Bybit needs an explicit subscribe frame (Binance encodes the streams
+       * in the URL). Only publicTrade + tickers: Bybit's finest kline is 1m,
+       * which cannot feed a 1s chart, so candles come from the prints. */
+      if (self._kind === 'bybit') {
+        try {
+          ws.send(JSON.stringify({
+            op: 'subscribe',
+            args: ['publicTrade.' + self._bsym, 'tickers.' + self._bsym]
+          }));
+        } catch (e) { self._lastError = 'subscribe frame failed'; }
+        self._lastPing = Date.now();
+      }
       var healed = self._demoFallback;       // auto-heal: drop synthetic tape
       self._attempt = 0;
       self._lastError = null;
       self._stopDemo();
       if (self._liveRetryTimer) { clearTimeout(self._liveRetryTimer); self._liveRetryTimer = null; }
+      self._seedProvider(self._kind);        // history from the provider that answered
       self._setStatus('open', healed ? 'recovered to live feed' : null);
     };
     ws.onmessage = function (ev) { self._handleMessage(ev.data); };
@@ -446,6 +570,7 @@
   BtcTradeFeed.prototype._handleMessage = function (text) {
     var msg;
     try { msg = JSON.parse(text); } catch (e) { return; }
+    if (this._kind === 'bybit') return this._handleBybit(msg);
     if (msg && typeof msg.stream === 'string' && msg.data) msg = msg.data; // combined unwrap
     if (!msg || typeof msg.e !== 'string') return;
 
@@ -475,6 +600,62 @@
     }
   };
 
+  /* Bybit v5 public spot frames (topic + data shape, unlike Binance's `e`).
+   * Two topics ride the one socket:
+   *   publicTrade.BTCUSDT -> data is an ARRAY of
+   *       {T: ms epoch, p: price, v: qty, S: 'Buy'|'Sell'}
+   *     S is the AGGRESSOR side (Bybit: 'Buy' = the taker bought), which maps
+   *     onto the same convention as Binance `m === false -> buy`, so the
+   *     pressure sign is identical across providers.
+   *   tickers.BTCUSDT -> data is an OBJECT with lastPrice / highPrice24h /
+   *     lowPrice24h / prevPrice24h / price24hPcnt. price24hPcnt is a FRACTION
+   *     (-0.0405 means -4.05 %), so it is scaled to the percent unit that
+   *     Binance's 24hrTicker.P already uses; the absolute change is derived
+   *     from lastPrice - prevPrice24h.
+   * The subscribe ack ({op:'subscribe'}) and {op:'pong'} carry no topic and
+   * are ignored. */
+  BtcTradeFeed.prototype._handleBybit = function (msg) {
+    if (!msg) return;
+    var topic = msg.topic;
+    if (typeof topic !== 'string') return;
+
+    if (topic.indexOf('publicTrade') === 0) {
+      var arr = msg.data;
+      if (!Array.isArray(arr)) return;
+      for (var i = 0; i < arr.length; i++) {
+        var tr = arr[i];
+        if (!tr) continue;
+        var side = tr.S === 'Buy' ? 'buy' : tr.S === 'Sell' ? 'sell' : null;
+        if (!side) continue;
+        var price = parseFloat(tr.p);
+        var qty = parseFloat(tr.v);
+        if (!isFinite(price) || !isFinite(qty)) continue;
+        this._ingestTrade({ ts: +tr.T || Date.now(), price: price, qty: qty, side: side });
+      }
+    } else if (topic.indexOf('tickers') === 0) {
+      var d = msg.data;
+      if (!d) return;
+      var last = parseFloat(d.lastPrice);
+      if (isFinite(last)) {
+        this._price = last;
+        /* Bybit spot BTCUSDT can go whole seconds without a print, which would
+         * punch holes in a 1-second chart, so every ticker push also refreshes
+         * the CURRENT second with the exchange's real last traded price
+         * (open kept, close/high/low updated). Order-flow pressure is
+         * deliberately NOT fed here: it stays pure aggressor-side trade flow. */
+        this._markPrice(last, Date.now());
+      }
+      var pct = parseFloat(d.price24hPcnt);
+      if (isFinite(pct)) this._chg24hPct = pct * 100;
+      var prev = parseFloat(d.prevPrice24h);
+      if (isFinite(prev) && isFinite(last)) this._chg24hAbs = last - prev;
+      var hi = parseFloat(d.highPrice24h);
+      if (isFinite(hi)) this._high24h = hi;
+      var lo = parseFloat(d.lowPrice24h);
+      if (isFinite(lo)) this._low24h = lo;
+    }
+  };
+
   BtcTradeFeed.prototype._ingestTrade = function (t) {
     this._acc.push(t);
     this._candles.ingestTrade(t.ts, t.price);
@@ -486,6 +667,12 @@
     if (this._chg.trade.length) {
       this._fire(this._chg.trade, { ts: t.ts, price: t.price, qty: t.qty, side: t.side, notional: t.price * t.qty });
     }
+  };
+
+  /* Mark a last traded price into the 1s series (see the tickers branch). */
+  BtcTradeFeed.prototype._markPrice = function (price, ts) {
+    if (!isFinite(price)) return;
+    this._candles.ingestTrade(ts || Date.now(), price);
   };
 
   /* ---------- throttled emit tick (also drives demo tape) ---------- */
@@ -504,6 +691,15 @@
         this._high24h = this._high24h == null ? this._price : Math.max(this._high24h, this._price);
         this._low24h = this._low24h == null ? this._price : Math.min(this._low24h, this._price);
       }
+    }
+
+    /* Bybit wants an application-level ping every ~20 s (it replies
+     * {"op":"pong"}); browsers auto-answer protocol pings but Bybit drops the
+     * connection without this. Costs nothing: one 14-byte frame per 20 s. */
+    if (this._kind === 'bybit' && this._ws && this._ws.readyState === 1 &&
+        now - this._lastPing > 20000) {
+      this._lastPing = now;
+      try { this._ws.send('{"op":"ping"}'); } catch (e) { /* rotation handles it */ }
     }
 
     var r = this._acc.compute(now);
@@ -540,6 +736,8 @@
       mode: this.effectiveMode(),
       connected: this._status === 'open' || this._status === 'demo',
       endpoint: this._endpoint(),
+      provider: this._kind,                       // 'binance' | 'bybit'
+      providerLabel: PROVIDER_LABELS[this._kind] || this._kind,
       attempt: this._attempt,
       lastError: this._lastError
     };
