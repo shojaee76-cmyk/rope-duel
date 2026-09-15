@@ -97,6 +97,7 @@ const s = await page.evaluate(() => {
     feedMode: st.mode, feedStatus: st.status, provider: st.provider,
     hudPrice: document.getElementById('price').textContent,
     statusText: document.getElementById('status-mode').textContent,
+    venue: (document.getElementById('chart-venue') || {}).textContent,
     price: st.price, candles: f.candles().count, seeded: f.candles().seeded,
     hasChart: !!window.__duelPage.chart
   };
@@ -118,6 +119,7 @@ ck('[deploy] chart module wired', s.hasChart, 'window.__duelPage.chart');
 ck('[deploy] chart panel painted', s.painted > 50, `${s.painted} px`);
 ck('[deploy] feed is LIVE (not the SIMULATION tape)', s.feedMode === 'live' && s.feedStatus === 'open', `mode=${s.feedMode} status=${s.feedStatus}`);
 ck('[deploy] HUD names the real provider', /^LIVE \u00b7 (BINANCE|BYBIT)$/.test(s.statusText.trim()), JSON.stringify(s.statusText));
+ck('[deploy] chart header names the real venue', s.venue === (s.provider || '').toUpperCase() + ' SPOT', JSON.stringify(s.venue));
 ck('[deploy] chart chip reads LIVE', s.chip === 'live' && s.chipText === 'LIVE', `${s.chip} "${s.chipText}"`);
 ck('[deploy] REST history seed applied', s.seeded === true && s.candles >= 60, `seeded=${s.seeded} candles=${s.candles}`);
 ck('[deploy] HUD price present', /\d/.test(s.hudPrice), s.hudPrice);

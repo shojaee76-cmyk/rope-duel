@@ -42,6 +42,7 @@ const meterBuy = $('meter-buy'), meterSell = $('meter-sell');
 const meterBuyPct = $('meter-buy-pct'), meterSellPct = $('meter-sell-pct');
 const meterDuelEl = $('meter-duel'), meterDuelTxt = $('meter-duel-text');
 const dotEl = $('status-dot'), modeEl = $('status-mode');
+const venueEl = $('chart-venue');   // chart header venue label (was hardcoded "BINANCE SPOT")
 const calloutLayer = $('callouts');
 const plates = {
   buy: { el: $('tag-buy'), state: $('state-buy'), mom: $('mom-buy'), last: '' },
@@ -135,6 +136,14 @@ function setStatus(st) {
   const STATUS_TEXT = { open: 'LIVE', connecting: 'CONNECTING', backoff: 'RECONNECTING', stopped: 'OFFLINE' };
   const label = isDemo ? 'SIMULATION' : (STATUS_TEXT[st.status] || (st.status || '').toUpperCase());
   modeEl.textContent = label + src;
+  /* The chart header used to hardcode "BINANCE SPOT", which became a lie as
+   * soon as the feed could run on the Bybit fallback. Name the venue the data
+   * actually comes from, and stay neutral before the first status arrives. */
+  if (venueEl) {
+    venueEl.textContent = st.providerLabel
+      ? String(st.providerLabel).toUpperCase() + ' SPOT'
+      : (isDemo ? 'SIMULATED' : 'SPOT MARKET');
+  }
   chart.notifyStatus(st); // chart chip mirrors the feed lifecycle instantly
 }
 

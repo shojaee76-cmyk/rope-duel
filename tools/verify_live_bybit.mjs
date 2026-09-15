@@ -75,6 +75,7 @@ const s1 = await page.evaluate(() => {
   const f = window.__duelPage.feed, st = f.snap(), c = f.candles();
   return {
     statusText: (document.getElementById('status-mode') || {}).textContent,
+    venue: (document.getElementById('chart-venue') || {}).textContent,
     chip: (document.getElementById('chart-chip-text') || {}).textContent,
     hudPrice: (document.getElementById('price') || {}).textContent,
     provider: st.provider, providerLabel: st.providerLabel, endpoint: st.endpoint,
@@ -127,6 +128,7 @@ results.net.consoleNetNoise = consoleErrors.filter((e) => NETNOISE.test(e));
 check('A: zero real console errors (handshake noise excluded)', realErrs.length === 0, realErrs.join(' | '));
 check('A: ended up live on a real provider', (s1.provider === 'binance' || s1.provider === 'bybit') && s1.mode === 'live' && s1.feedStatus === 'open', `provider=${s1.provider} mode=${s1.mode} status=${s1.feedStatus}`);
 check('A: HUD advertises the true source', s1.statusText === 'LIVE \u00b7 ' + String(s1.providerLabel).toUpperCase(), JSON.stringify(s1.statusText));
+check('A: chart header names the real venue (no stale BINANCE SPOT)', s1.venue === String(s1.providerLabel).toUpperCase() + ' SPOT', JSON.stringify(s1.venue));
 check('A: chart chip reads LIVE', s2.chip === 'LIVE', JSON.stringify(s2.chip));
 check('A: never fell back to the SIMULATION tape', !/SIMUL/.test(s1.statusText || ''), s1.statusText);
 check('A: real price displayed', s2.lastPrice > 1000 && /[\d,]{6,}/.test(s1.hudPrice || ''), `hud=${s1.hudPrice} feed=${s2.lastPrice}`);
