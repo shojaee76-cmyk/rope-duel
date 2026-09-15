@@ -17,8 +17,14 @@ const root = 'C:/Users/capit/rope-duel';
 const BASE = 'https://shojaee76-cmyk.github.io/rope-duel/';
 
 const FILES = ['index.html', 'feed.js', 'bundle.js', 'chart.css'];
+/* Compare CONTENT, with CRLF normalized to LF. This repo has no .gitattributes
+ * and core.autocrlf rewrites working-copy line endings on checkout, so a raw
+ * byte hash can differ for a file whose deployed content is identical (this
+ * bit the check on index.html, the one file that existed before this change).
+ * Line endings are a checkout artifact, not a code difference. */
+const norm = (b) => createHash('sha256').update(Buffer.from(b).toString('utf8').replace(/\r\n/g, '\n')).digest('hex');
 const local = {};
-for (const f of FILES) local[f] = createHash('sha256').update(await readFile(path.join(root, f))).digest('hex');
+for (const f of FILES) local[f] = norm(await readFile(path.join(root, f)));
 
 let pending = new Set(FILES);
 for (let i = 0; i < 15 && pending.size; i++) {
@@ -26,9 +32,9 @@ for (let i = 0; i < 15 && pending.size; i++) {
     try {
       const r = await fetch(BASE + f + '?bust=' + Date.now(), { signal: AbortSignal.timeout(15000) });
       if (!r.ok) { console.log(`attempt ${i + 1}: ${f} HTTP ${r.status}`); continue; }
-      const sha = createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex');
+      const sha = norm(Buffer.from(await r.arrayBuffer()));
       if (sha === local[f]) {
-        console.log(`PASS  ${f} sha256 == local (${sha.slice(0, 12)})`);
+        console.log(`PASS  ${f} content == local (${sha.slice(0, 12)})`);
         pending.delete(f);
       } else {
         console.log(`attempt ${i + 1}: ${f} differs (${sha.slice(0, 8)}...) - Pages still rebuilding`);
@@ -38,6 +44,20 @@ for (let i = 0; i < 15 && pending.size; i++) {
   if (pending.size) await new Promise((r) => setTimeout(r, 20000));
 }
 if (pending.size) { console.log('FAIL: deployed files never matched local: ' + [...pending].join(', ')); process.exit(1); }
+
+/* Semantic guard on top of the hashes: prove the deployed feed really is the
+ * multi-provider build, so a hash logic slip cannot pass a stale file. */
+{
+  const r = await fetch(BASE + 'feed.js?bust=' + Date.now(), { signal: AbortSignal.timeout(20000) });
+  const txt = await r.text();
+  let bad = 0;
+  for (const [what, needle] of [['feed version marker', "var VERSION = '1.1.0'"], ['bybit provider', 'stream.bybit.com'], ['bybit subscribe topic', 'publicTrade.'], ['provider seed hook', '_seedProvider']]) {
+    const ok = txt.includes(needle);
+    console.log(`${ok ? 'PASS' : 'FAIL'}  deployed feed.js has ${what}`);
+    if (!ok) bad++;
+  }
+  if (bad) process.exit(1);
+}
 
 /* ---------- headless pass on the deployed page ---------- */
 const cands = [
