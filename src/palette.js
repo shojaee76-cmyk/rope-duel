@@ -72,5 +72,19 @@ export const DIM = {
   restSagOne: 0.34, restSagTwo: 0.5, damping: 0.93, swayClamp: 0.12,
   impulseScale: 0.16,      // global multiplier on every injected impulse
   ropeSmooth: 20,          // 1/s low-pass on the rendered rope points
-  poleClearance: 1.5, catHeight: 1.3
+  poleClearance: 1.5, catHeight: 1.3,
+  // v10 contact limits (RENDERED space, world units). The cats' heads are
+  // oversized by design and reach ~0.30 past the head pivot, so the body floor
+  // has to be far wider than the torso itself or the skulls intersect:
+  // measured at minBodyGap 0.68 the head centres sat 0.02 apart and the nose
+  // tips 0.01 apart on 59% of brawl frames.
+  minBodyGap: 0.78,        // torso-to-torso floor
+  /* Head clearance = 2 x 0.40 world units. Everything on a head (skull r 0.23,
+   * muzzle box and nose 0.30 out from the pivot, helmet brim) lies inside 0.33
+   * of the pivot, so 0.66 is the true no-interpenetration distance. It is set
+   * WIDER on purpose: at 0.66 the muzzle tips cleared each other by 6 px on
+   * screen, which still read as "the heads are colliding" in review. At 0.80 the
+   * two muzzles keep ~30 px of daylight between them in the closest beat, and the
+   * skulls ~56 px, at 1280x800 (measured with tools/screen_gap.mjs). */
+  minHeadCentre: 0.80
 };

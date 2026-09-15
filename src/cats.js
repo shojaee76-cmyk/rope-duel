@@ -573,7 +573,11 @@ const IDLE_POSE = () => ({
   tailCurl: 0, tailAmp: 0.1, capeRaise: 0, lock: 0, tremble: 0
 });
 
-const NUM_KEYS = Object.keys(IDLE_POSE());
+// One shared rest pose per frame instead of a fresh object per cat per frame:
+// the old IDLE_POSE() call allocated twice per frame (pure GC churn in a brawl).
+const IDLE_TEMPLATE = IDLE_POSE();
+
+const NUM_KEYS = Object.keys(IDLE_TEMPLATE);
 
 export class DuelCat {
   constructor(kind) {
@@ -610,7 +614,7 @@ export class DuelCat {
     this.time += dt;
     st.t += dt;
 
-    Object.assign(this.target, IDLE_POSE());
+    Object.assign(this.target, IDLE_TEMPLATE);
     this.target.tailCurl = this.data.side === 'A' ? -1.15 : 0.95;
 
     switch (st.name) {
@@ -1081,7 +1085,10 @@ export class DuelCat {
   _dish(d) {
     const geo = d.dish.skirt.geometry;
     const pos = geo.attributes.position;
-    if (!d.dish.base) d.dish.base = Float32Array.from(pos.array);
+    if (!d.dish.base) {
+      d.dish.base = Float32Array.from(pos.array);
+      pos.setUsage(THREE.DynamicDrawUsage);   // rewritten every frame
+    }
     const base = d.dish.base;
     const t = this.time;
     for (let i = 0; i < pos.count; i++) {
@@ -1100,7 +1107,10 @@ export class DuelCat {
   _cape() {
     const cape = this.data.cape;
     const pos = cape.geometry.attributes.position;
-    if (!this._capeBase) this._capeBase = Float32Array.from(pos.array);
+    if (!this._capeBase) {
+      this._capeBase = Float32Array.from(pos.array);
+      pos.setUsage(THREE.DynamicDrawUsage);   // rewritten every frame
+    }
     const base = this._capeBase;
     const t = this.time;
     const raise = this.pose.capeRaise || 0;
@@ -1121,5 +1131,17 @@ export class DuelCat {
 
   bladeMidWorld(out = new V3()) {
     return this.data.sword.localToWorld(out.set(0.55, 0, 0));
+  }
+
+  /* Forward-most point of the head: the muzzle tip (the nose sphere sits at
+   * local x 0.27, radius 0.028, head pivot at spine-local x 0.10). This is the
+   * point that actually collides when two oversized heads meet, so the contact
+   * constraint in scene.js measures THIS rather than the body centres. */
+  headTipWorld(out = new V3()) {
+    return this.data.head.localToWorld(out.set(0.30, -0.04, 0));
+  }
+
+  headCentreWorld(out = new V3()) {
+    return this.data.head.localToWorld(out.set(0, 0, 0));
   }
 }

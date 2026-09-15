@@ -119,10 +119,21 @@
 
   /* ---------- pressure meter: tug-of-war blade ---------- */
   #meter { position: fixed; top: 92px; left: 50%; translate: -50% 0;
-    z-index: 10; width: min(50vw, 470px); padding: 6px; border-radius: 20px;
+    z-index: 10; width: min(50vw, 470px); padding: 5px 6px 6px; border-radius: 20px;
     background: var(--plate); border: 1px solid var(--hairline);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  /* Header row, mirroring the chart panel (title left, state chip right).
+     The duel-state badge used to be absolutely positioned on the track's top
+     seam, where the track's overflow:hidden clipped half of it and the
+     tug-of-war stem ran through the text; the HUD above leaves only 2.5px of
+     room, so it cannot float clear either. A real row is the honest fix: the
+     state reads as a labelled field of the meter instead of balancing on its
+     edge. */
+  #meter-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; height: 20px; margin: 0 3px 5px; }
+  #meter-head .mh-label { font: 500 8.5px/1 var(--font-data); letter-spacing: 0.24em;
+    color: var(--ink-faint); text-transform: uppercase; white-space: nowrap; }
   #meter-track { position: relative; height: 46px; border-radius: 14px; overflow: hidden;
     background: var(--panel);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.06); }
@@ -143,25 +154,35 @@
   #meter-center { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
     margin-left: -1px; background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.85) 50%, rgba(255,255,255,0.05));
     z-index: 2; }
-  #meter-duel { position: absolute; left: 50%; top: 0; transform: translate(-50%, -50%);
-    z-index: 4; display: flex; align-items: center; gap: 6px; pointer-events: none;
+  /* duel-state chip: sits in the meter header row (see #meter-head) */
+  #meter-duel { display: flex; align-items: center; gap: 6px; pointer-events: none;
     font: 700 9.5px/1 var(--font-data); letter-spacing: 0.22em; color: var(--ink);
-    padding: 5px 11px; border-radius: 999px; background: rgba(5, 6, 15, 0.85);
-    border: 1px solid var(--hairline); white-space: nowrap;
+    padding: 5px 11px; border-radius: 999px; white-space: nowrap;
+    background: rgba(6, 7, 17, 0.75);
+    border: 1px solid var(--hairline);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
     transition: color 0.25s, border-color 0.25s, box-shadow 0.25s; }
   #meter-duel.act { color: var(--gold-bright); border-color: rgba(245, 197, 66, 0.55);
-    box-shadow: 0 0 18px rgba(245, 197, 66, 0.28); }
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06), 0 0 18px rgba(245, 197, 66, 0.3); }
   #meter-duel i { width: 6px; height: 6px; transform: rotate(45deg); background: var(--gold);
     border-radius: 1px; }
   #meter-duel.act i { animation: duel-spin 0.7s var(--ease-snap) infinite alternate; }
   @keyframes duel-spin { from { transform: rotate(45deg) scale(1); }
     to { transform: rotate(225deg) scale(1.25); } }
   #meter-blah { position: absolute; inset: 0; display: flex; align-items: center;
-    justify-content: space-between; padding: 0 14px; z-index: 3; pointer-events: none;
+    justify-content: space-between; padding: 0 17px; z-index: 3; pointer-events: none;
     font: 700 10px/1 var(--font-data); letter-spacing: 0.16em; }
   #meter-blah .s { color: var(--sell-bright); display: flex; align-items: center; gap: 7px; }
   #meter-blah .b { color: var(--buy-bright); display: flex; align-items: center; gap: 7px; }
-  #meter-blah .pct { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  #meter-blah .pct { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums;
+    /* the fills grow out from the centre, so at high pressure their leading-edge
+       diamond lands exactly under these labels: a soft plate keeps the number
+       legible over a full-brightness fill */
+    padding: 2px 8px; border-radius: 7px;
+    background: rgba(6, 8, 18, 0.55);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+  #meter-blah .s .pct { margin-right: 2px; }
+  #meter-blah .b .pct { margin-left: 2px; }
   .sword-ico { width: 13px; height: 13px; flex: 0 0 auto; }
   .sword-ico path, .sword-ico rect, .sword-ico circle { fill: currentColor; }
 
@@ -287,6 +308,8 @@
     #hud .hud-cell.hud-24h { display: none; }
     #chg24h { font-size: 11px; }
     #meter { width: 78vw; top: 64px; padding: 5px; }
+    #meter-head { height: 18px; margin-bottom: 4px; justify-content: center; }
+    #meter-head .mh-label { display: none; }
     #meter-track { height: 40px; }
     #meter-duel { font-size: 8px; padding: 4px 8px; letter-spacing: 0.14em; }
     .plate { top: 38%; width: 128px; padding: 4px; border-radius: 15px; }
@@ -351,6 +374,10 @@
 </div>
 
 <div id="meter" role="meter" aria-label="buy versus sell pressure">
+  <div id="meter-head">
+    <span class="mh-label">Pressure &middot; 30s window</span>
+    <div id="meter-duel"><i></i><span id="meter-duel-text">EN GARDE</span></div>
+  </div>
   <div id="meter-track">
     <div id="meter-buy"></div>
     <div id="meter-sell"></div>
@@ -359,7 +386,6 @@
       <span class="s"><span class="pct" id="meter-sell-pct">0%</span><svg class="sword-ico" viewBox="0 0 16 16" aria-hidden="true"><g transform="rotate(-45 8 8)"><path d="M8 0.8 L9.5 3.2 L9.5 9.2 L6.5 9.2 L6.5 3.2 Z"/><rect x="3.6" y="9.2" width="8.8" height="1.5" rx="0.75"/><rect x="7.25" y="10.7" width="1.5" height="2.6" rx="0.75"/><circle cx="8" cy="14.2" r="1.25"/></g></svg>SELL</span>
       <span class="b">BUY<svg class="sword-ico" viewBox="0 0 16 16" aria-hidden="true"><g transform="rotate(45 8 8)"><path d="M8 0.8 L9.5 3.2 L9.5 9.2 L6.5 9.2 L6.5 3.2 Z"/><rect x="3.6" y="9.2" width="8.8" height="1.5" rx="0.75"/><rect x="7.25" y="10.7" width="1.5" height="2.6" rx="0.75"/><circle cx="8" cy="14.2" r="1.25"/></g></svg><span class="pct" id="meter-buy-pct">0%</span></span>
     </div>
-    <div id="meter-duel"><i></i><span id="meter-duel-text">EN GARDE</span></div>
   </div>
 </div>
 

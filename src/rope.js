@@ -131,7 +131,9 @@ class RopeTube {
     }
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.normal.needsUpdate = true;
-    this.geo.computeBoundingSphere();
+    // NOTE: no per-frame computeBoundingSphere(). The rope mesh is
+    // frustumCulled = false, so nothing ever reads the bounds - it was a full
+    // 1469-vertex pass every frame for a value nobody consumed.
   }
 }
 
@@ -178,6 +180,7 @@ export class VerletRope {
     this.mesh = new THREE.Mesh(this.tube.geo, this.mat);
     this.mesh.castShadow = false;
     this.mesh.frustumCulled = false;
+    this.mesh.boundingSphere = new THREE.Sphere(new V3(0, this.restY, 0), spanHalf + 1);
 
     // Catmull-Rom over the smoothed points, mutated in place (no allocation)
     this._curvePts = this.spos.map((p) => p.clone());

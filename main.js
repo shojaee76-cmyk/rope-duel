@@ -33,7 +33,11 @@ const isMobile = matchMedia('(pointer: coarse)').matches || innerWidth < 640;
 const scene = createDuelScene($('duel-scene'), {
   demo: true,          // self-drives until the first live payload arrives
   debug: true,
-  vfxScale: isMobile ? 0.4 : (qs.get('nofx') ? 0.2 : 1)
+  vfxScale: isMobile ? 0.4 : (qs.get('nofx') ? 0.2 : 1),
+  // ?res=0.75 pins the render ratio; the quality governor handles the rest and
+  // is disabled automatically when a ratio is pinned
+  res: qs.get('res') ? Number(qs.get('res')) : undefined,
+  governor: qs.get('gov') !== 'off' && !qs.get('res')
 });
 
 /* ---------- HUD refs ---------- */

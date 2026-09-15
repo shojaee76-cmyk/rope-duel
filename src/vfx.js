@@ -24,6 +24,14 @@ function sparkSprite() {
   return SPRITE;
 }
 
+// pooled tints: `new THREE.Color(tint)` per spawn is a per-particle allocation
+const TINTS = new Map();
+function tintColor(c) {
+  let v = TINTS.get(c);
+  if (!v) { v = new THREE.Color(c); TINTS.set(c, v); }
+  return v;
+}
+
 class Pool {
   constructor(scene, { count = 120, size = 0.05, color = 0xffffff, gravity = -9.8, drag = 1.5, life = 0.7 }) {
     this.count = count;
@@ -57,7 +65,7 @@ class Pool {
       this.vel[i * 3 + 2] = (Math.random() - 0.5) * spread;
       spawned++;
     }
-    if (tint) this.points.material.color.lerp(new THREE.Color(tint), 0.35);
+    if (tint) this.points.material.color.lerp(tintColor(tint), 0.35);
   }
 
   update(dt) {

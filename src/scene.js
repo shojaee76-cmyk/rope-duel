@@ -25,7 +25,14 @@ export function createDuelScene(container, opts = {}) {
   // renderer / scene / camera (spec 1.1)
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const desktopQuality = (opts.vfxScale || 1) > 0.5;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, desktopQuality ? 2 : 1.25));
+  /* Base render ratio. It used to be min(dpr, 2), i.e. 4x the pixels of a 1x
+   * display: measured on this laptop's iGPU the WebGL pass costs 7 ms at 1x and
+   * 23 ms at 2x, so a 2x cap spends the whole frame budget before the scene has
+   * drawn a single cat. 1.5 is visually equivalent on a dark scene and leaves
+   * room below; the quality governor below takes it further down when needed. */
+  const baseRatio = opts.res ? Math.max(0.4, Math.min(2, opts.res))
+    : Math.min(devicePixelRatio || 1, desktopQuality ? 1.5 : 1.25);
+  renderer.setPixelRatio(baseRatio);
   renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
   renderer.shadowMap.enabled = false;   // v4: cost 40% of the frame budget
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -106,12 +113,25 @@ export function createDuelScene(container, opts = {}) {
   }
   window.addEventListener('pointermove', onMouse, { passive: true });
 
-  // ---- combat hooks: VFX + rope nudges + camera shake ----
+  // combat hooks: VFX + rope nudges + camera shake
   const shake = { t: 0, amp: 0 };
   let slowmo = 0;
   let camPan = 0;
   let camPush = 0;      // smoothed brawl push-in
   let heat = 0;         // 0..1 fight heat (drives crowd + camera energy)
+  // scratch vectors: the fight code used to allocate 4-6 Vector3s per frame
+  // (bladeMidWorld / lerp / head tips), which is pure GC churn in a brawl
+  const _hA = new THREE.Vector3(), _hB = new THREE.Vector3();
+  const _mid = new THREE.Vector3(), _tip = new THREE.Vector3(), _tmpV = new THREE.Vector3();
+  // contact telemetry (debug only): how often the head constraint had to fire and
+  // how close the muzzle tips got BEFORE (worst) and AFTER (worstOut) the fix, so
+  // the constraint's own output is verifiable, not just inferred from the render
+  const contact = opts.debug ? { checks: 0, fixes: 0, worst: 9, worstOut: 9, post: null } : null;
+  function bladeCross(a, b, out) {
+    a.bladeMidWorld(out);
+    b.bladeMidWorld(_tmpV);
+    return out.lerp(_tmpV, 0.5);
+  }
   function clampFoe(x) {
     const lim = DIM.spanHalf - DIM.poleClearance;
     return THREE.MathUtils.clamp(x, -lim, lim);
@@ -180,7 +200,7 @@ export function createDuelScene(container, opts = {}) {
   const ctx = { rope, flagDart: false, pressureWobble: 0, circlePhase: 0, ...hooks };
 
   director.onClash = () => {
-    const p = catA.bladeMidWorld().lerp(catB.bladeMidWorld(), 0.5);
+    const p = bladeCross(catA, catB, _mid);
     vfx.clashBurst(p);
     vfx.clashBurst(p);
     kick(0.16, 0.13);
@@ -249,6 +269,76 @@ export function createDuelScene(container, opts = {}) {
   resize();
   window.addEventListener('resize', onResize);
 
+  /* ---------- adaptive quality governor (v10) ----------
+   * The complaint that started this: "fps drops midfight". Measured cause: the
+   * scene is GPU-bound, not JS-bound (JS 0.4 ms/frame against a 7-23 ms WebGL
+   * pass), and a brawl adds the spendy bits at once - the camera pushes in, both
+   * spark pools saturate to ~300 additive sprites, and every panel on screen is
+   * animating. On a machine whose GPU is also driving a browser or an IDE that
+   * tips the frame budget over and the whole fight plays in slow motion.
+   *
+   * Nothing about the drawing can be made free, so the governor trades the one
+   * resource nobody can see the difference in: render resolution. It watches the
+   * median frame time over a short window and steps the pixel ratio DOWN while
+   * frames are slow, back UP when there is headroom, with a cooldown so it can
+   * never oscillate. The scene keeps its geometry, textures, particles and
+   * animation - only the sampling density changes, and only as far as it must.
+   * ?res=0.75 pins the ratio, ?gov=off disables the governor entirely. */
+  const RATIO_STEPS = [1, 0.85, 0.72, 0.6, 0.5];
+  const gov = {
+    on: opts.governor !== false,
+    base: baseRatio, step: 0, ratio: baseRatio, changes: 0, fails: 0,
+    window: 16, slowMs: 20, fastMs: 13.5,   // >20 ms = below 50 fps, <13.5 ms = above 74 fps
+    buf: [], cooldown: 0, hold: 0, med: 0,
+    pending: 0, preMed: 0, lock: 0            // lock counts consecutive failed attempts
+  };
+  function applyStep(i) {
+    gov.step = Math.max(0, Math.min(RATIO_STEPS.length - 1, i));
+    gov.ratio = gov.base * RATIO_STEPS[gov.step];
+    renderer.setPixelRatio(gov.ratio);
+    resize();
+    gov.buf.length = 0;
+  }
+  function govern(frameMs) {
+    if (!gov.on) return;
+    gov.buf.push(frameMs);
+    if (gov.buf.length < gov.window) return;
+    const s = gov.buf.slice().sort((a, b) => a - b);
+    gov.med = s[s.length >> 1];
+    gov.buf.length = 0;
+    /* Verify that the last resolution drop bought something. MEASURED: under a
+     * genuinely saturated GPU (three WebGL contexts on this iGPU) 1920x1200 ->
+     * 640x400, nine times fewer pixels, buys only ~16% of frame rate - the cost
+     * is the contention itself, not fill. So if a step down does not help, undo
+     * it and stop meddling rather than spiralling through every step. It takes
+     * TWO failed attempts to lock (one noisy window is not evidence), and a long
+     * quiet stretch unlocks and lets it try again, because contention is
+     * transient. */
+    if (gov.pending > 0) {
+      if (--gov.pending === 0) {
+        if (gov.med > gov.preMed * 0.92) {
+          if (gov.step > 0) applyStep(gov.step - 1);
+          if (++gov.fails >= 2) gov.lock = 1;
+        } else gov.fails = 0;
+      }
+      return;
+    }
+    if (gov.lock) {
+      // still watching: after ~8 comfortable windows, contention has probably gone
+      if (gov.med < gov.fastMs) { if (++gov.lock > 8) { gov.lock = 0; gov.fails = 0; gov.cooldown = 2; } }
+      else if (gov.lock > 8) gov.lock = 1;    // keep the lock while it is still slow
+      return;
+    }
+    if (gov.cooldown > 0) { gov.cooldown--; return; }
+    if (gov.med > gov.slowMs && gov.step < RATIO_STEPS.length - 1) {
+      gov.preMed = gov.med; gov.pending = 3; gov.hold = 0;
+      applyStep(gov.step + 1); gov.changes++;
+    } else if (gov.med < gov.fastMs && gov.step > 0) {
+      // only climb back after several consecutive comfortable windows
+      if (++gov.hold >= 3) { applyStep(gov.step - 1); gov.cooldown = 5; gov.changes++; gov.hold = 0; }
+    } else gov.hold = 0;
+  }
+
   // main loop
   let frameCount = 0;
   let simTime = 0;
@@ -300,19 +390,62 @@ export function createDuelScene(container, opts = {}) {
     director.update(dt);
     catA.update(dt, ctx);
     catB.update(dt, ctx);
-    // hard floor on the RENDERED separation: body offsets (lunge reach, hit
-    // reels, tumbles) can eat the whole gap and leave the two cats standing
-    // inside each other, so nudge the base positions apart when that happens.
+    // ---- contact constraints (v10) ----
+    // The cats carry oversized heads (spec 2: ~35% of standing height) that stick
+    // ~0.30 units past the head pivot, so a 0.68-unit body gap still buried the
+    // muzzles in each other. Measured baseline: head centres 0.02 units apart, nose
+    // tips 0.01 apart, i.e. overlapping in ~59% of brawl frames. Constrain the
+    // RENDERED pose from the real head geometry instead of a guessed body radius.
     {
-      const MIN_RENDERED = 0.68;
-      const ax = catA.x + catA.pose.xOff, bx = catB.x + catB.pose.xOff;
-      const d = ax - bx;
-      const gapN = Math.abs(d);
-      if (gapN < MIN_RENDERED) {
-        const sgn = d >= 0 ? 1 : -1;
-        const push = (MIN_RENDERED - gapN) / 2;
-        catA.x += sgn * push;
-        catB.x -= sgn * push;
+      const aR = catA.x + catA.pose.xOff, bR = catB.x + catB.pose.xOff;
+      const shift = (s, d) => {
+        catA.x += s * d; catB.x -= s * d;
+        catA.root.position.x += s * d; catB.root.position.x -= s * d;
+      };
+      // body floor: the torso is ~0.16 radius, so 0.78 keeps a visible air gap
+      const gBody = Math.abs(aR - bR);
+      if (gBody < DIM.minBodyGap) shift(aR >= bR ? 1 : -1, (DIM.minBodyGap - gBody) / 2);
+      /* Head clearance: ONE rotation-invariant constraint.
+       * Everything that can collide - skull (radius 0.23), muzzle box and nose
+       * (0.30 out from the pivot), helmet brim - lies within 0.33 of the head
+       * PIVOT, so keeping the two pivots 0.66 apart (DIM.minHeadCentre) means the
+       * two head volumes can touch but never interpenetrate, in ANY pose.
+       *
+       * Earlier attempts constrained the muzzle TIPS instead and both failed, with
+       * the reason measured rather than guessed:
+       *  - a tip is orientation dependent. In RECOVER (the windmill every move
+       *    ends with) the two muzzles point at each other with the pivots only
+       *    0.57 apart, i.e. the tips are 0.6 of reach across a 0.57 gap: the tips
+       *    were crossed by 0.01-0.2, and pushing the bodies apart DECREASED the tip
+       *    distance (measured over four passes: 0.231 -> 0.144 -> 0.128 -> 0.100 ->
+       *    0.077). Dropping the tip fix in those frames left the muzzles overlapping
+       *    on 34% of frames.
+       *  - a tip's separation cannot be solved in x when the tips are crossed, but
+       *    a pivot's can, always and monotonically.
+       * So the constraint is on the pivots: no sign tests, no crossed case, no
+       * residual. */
+      const H2 = DIM.minHeadCentre * DIM.minHeadCentre;
+      if (contact) contact.checks++;
+      for (let it = 0; it < 3; it++) {
+        const s = (catA.x + catA.pose.xOff) >= (catB.x + catB.pose.xOff) ? 1 : -1;
+        catA.headCentreWorld(_hA); catB.headCentreWorld(_hB);
+        const ex = _hA.x - _hB.x, dy = _hA.y - _hB.y, dz = _hA.z - _hB.z;
+        const dh = Math.sqrt(ex * ex + dy * dy + dz * dz);
+        if (contact && dh < contact.worst) contact.worst = dh;
+        if (dh >= DIM.minHeadCentre) break;
+        const need = Math.sqrt(Math.max(0, H2 - (dy * dy + dz * dz))) - Math.abs(ex);
+        if (need <= 0) break;
+        shift(s, Math.min(need / 2, 0.5));
+        if (contact) contact.fixes++;
+        // force the whole rig so the head's siblings (ears, helmet, muzzle) are
+        // drawn with the shifted pose in the same frame, not one frame late
+        catA.root.updateMatrixWorld(true); catB.root.updateMatrixWorld(true);
+      }
+      if (contact) {
+        catA.headCentreWorld(_hA); catB.headCentreWorld(_hB);
+        const hc = _hA.distanceTo(_hB);
+        if (hc < contact.worstOut) contact.worstOut = hc;
+        contact.post = { hc: +hc.toFixed(4), n: frameCount, gap: +Math.abs((catA.x + catA.pose.xOff) - (catB.x + catB.pose.xOff)).toFixed(3) };
       }
     }
     rope.updateVisual();
@@ -327,7 +460,7 @@ export function createDuelScene(container, opts = {}) {
 
     // blade lock: a steady shower of sparks at the crossing blades
     if (brawling && frameCount % 3 === 0) {
-      const p = catA.bladeMidWorld().lerp(catB.bladeMidWorld(), 0.5);
+      const p = bladeCross(catA, catB, _mid);
       vfx.clashBurst(p);
       vfx.emberBurst(p);
     }
@@ -390,13 +523,15 @@ export function createDuelScene(container, opts = {}) {
     camera.lookAt(camPan * 0.9, 3.15 - camPush * 0.1, 0);
 
     renderer.render(scene, camera);
+    govern(rawDt * 1000);   // frame-time feedback for the quality governor
   }
   loop();
 
   // debug/integration handle (used by tests and the root webpage task)
   if (opts.debug) {
     window.__duelDebug = {
-      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade,
+      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, gov, contact,
+      quality: () => ({ ratio: gov.ratio, base: gov.base, step: gov.step, med: gov.med, changes: gov.changes, on: gov.on, fails: gov.fails, lock: gov.lock }),
       heat: () => heat,
       freeze: (armed, ax = 1.1, bx = -1.1) => {
         freezeCtl.armed = !!armed; freezeCtl.ax = ax; freezeCtl.bx = bx;

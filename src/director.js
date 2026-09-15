@@ -180,15 +180,15 @@ export class FightDirector {
       if (this.phase === 'circle') {
         this.phase = 'engage';
         this.phaseDur = 0.9 + Math.random() * 1.2 + P * 0.8;
-        this.gapTarget = 1.05 + Math.random() * 0.35;
+        this.gapTarget = 1.45 + Math.random() * 0.40;
       } else if (this.phase === 'engage') {
         this.phase = 'break';
         this.phaseDur = 0.35 + Math.random() * 0.5;
-        this.gapTarget = 2.0 + Math.random() * 0.7;
+        this.gapTarget = 2.25 + Math.random() * 0.7;
       } else {
         this.phase = 'circle';
         this.phaseDur = 0.7 + Math.random() * 0.9;
-        this.gapTarget = 1.75 + Math.random() * 0.55;
+        this.gapTarget = 1.95 + Math.random() * 0.55;
       }
     }
     this.engage = this.phase === 'engage' ? 1 : 0;
@@ -208,9 +208,11 @@ export class FightDirector {
     A.x = clamp(ax, -lim, lim);
     B.x = clamp(bx, -lim, lim);
     this.gap = Math.abs(A.x - B.x);
-    // separation sanity: never let the bodies intersect (the cat's head reaches
-    // ~0.3 past its centre, so 0.9 keeps a real air gap between the skulls)
-    const minSep = 0.95;
+    // separation sanity: the cats' heads are oversized and reach ~0.30 past the
+    // head pivot, so the pair must be kept further apart than the bodies alone
+    // would need or the skulls intersect (see DIM.minBodyGap/ minHeadGap and the
+    // hard contact constraint in scene.js, which enforces the rendered result).
+    const minSep = 1.05;
     if (this.gap < minSep) {
       const push = (minSep - this.gap) / 2;
       const dir = A.x > B.x ? 1 : -1;
@@ -334,7 +336,7 @@ export class FightDirector {
     const cat = this.cats[side];
     // travel distance is bounded by the live gap: they close in, never overlap
     if (move === 'RUSH' || move === 'LUNGE') {
-      data.reach = clamp(this.gap - 0.95, 0.15, 1.0);
+      data.reach = clamp(this.gap - 1.15, 0.12, 1.0);
     }
     this.cools[move] = this.now + spec.cool;
     this.sideCool[side] = this.now + 0.55;   // short: the other cat answers fast
