@@ -9,4 +9,5 @@ _*.png
 live_shot.png
 tools/shots/
 tools/*.json
+dev/
 *.eyes.jpg
