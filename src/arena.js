@@ -2,6 +2,7 @@
 // tiled floor with the duel medallion, dry fountain, BTC moon, torches (spec 5).
 import * as THREE from '../vendor/three.module.js';
 import { ARENA, MATERIALS, DIM } from './palette.js';
+import { canvasTexture } from './tex.js';
 
 const std = (color, kind = 'cloth', extra = {}) =>
   new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
@@ -12,18 +13,12 @@ const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
 };
 const torus = (r, t, arc = Math.PI * 2) => new THREE.TorusGeometry(r, t, 8, 28, arc);
 
-function canvasTexture(c) {
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
-}
-
 // azulejo dado: eight-point stars, two alternating colorways (spec 5.2)
 function azulejoTexture() {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
+  const soft = 'filter' in g;
   const star = (cx, cy, s, fg, bg) => {
     g.fillStyle = bg;
     g.fillRect(cx - s / 2, cy - s / 2, s, s);
@@ -44,11 +39,15 @@ function azulejoTexture() {
       g.restore();
     }
   };
+  // v4: soften the star edges - the dado is the finest pattern in the scene
+  // and its hard edges crawled as the camera moved
+  if (soft) g.filter = 'blur(0.35px)';
   const colorways = [['#1F5FA8', '#F2EFE9'], ['#12755F', '#F2EFE9']];
   star(32, 32, 62, ...colorways[0]);
   star(96, 96, 62, ...colorways[0]);
   star(96, 32, 62, ...colorways[1]);
   star(32, 96, 62, ...colorways[1]);
+  if (soft) g.filter = 'none';
   return canvasTexture(c);
 }
 
@@ -59,8 +58,8 @@ function wallTexture() {
   const g = c.getContext('2d');
   g.fillStyle = ARENA.stoneWall;
   g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = ARENA.stoneShadow;
-  g.lineWidth = 2.5;
+  g.strokeStyle = 'rgba(112,84,58,0.8)';   // v4: softer relief lines (less crawl)
+  g.lineWidth = 2;
   // sebka: interlacing diamond grid
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -108,10 +107,14 @@ function floorTexture(medallion) {
   const c = document.createElement('canvas');
   c.width = 512; c.height = 512;
   const g = c.getContext('2d');
+  const soft = 'filter' in g;
   g.fillStyle = ARENA.floorBase;
   g.fillRect(0, 0, 512, 512);
-  g.strokeStyle = ARENA.floorGrout;
-  g.lineWidth = 3;
+  // v4: SOFTER but still defined grout. Hard 3px dark-on-cream lines at a
+  // grazing angle were the classic pixel-crawl source; this keeps the grid
+  // readable without the shimmer.
+  g.strokeStyle = 'rgba(104,86,62,0.66)';
+  g.lineWidth = 2.5;
   for (let i = 0; i <= 512; i += 64) {
     g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 512); g.stroke();
     g.beginPath(); g.moveTo(0, i); g.lineTo(512, i); g.stroke();
@@ -119,6 +122,7 @@ function floorTexture(medallion) {
   if (medallion) {
     // eight-point star split half gold / half emerald at canvas center
     const cx = 256, cy = 256, R = 120;
+    if (soft) g.filter = 'blur(0.45px)';
     const star = (rot, fill) => {
       g.fillStyle = fill;
       g.beginPath();
@@ -133,9 +137,10 @@ function floorTexture(medallion) {
     };
     star(-Math.PI / 2, '#D4A017');   // right half gold
     star(Math.PI / 2, '#0F5D4E');    // left half emerald
-    g.strokeStyle = ARENA.floorGrout;
+    g.strokeStyle = 'rgba(110,90,66,0.75)';
     g.lineWidth = 5;
     g.beginPath(); g.arc(cx, cy, R + 14, 0, Math.PI * 2); g.stroke();
+    if (soft) g.filter = 'none';
   }
   return canvasTexture(c);
 }
@@ -502,11 +507,17 @@ export function buildArena(scene) {
 }
 
 // per-frame flicker (spec 5.4: noise-driven intensity)
+// v4: SLOW + SHALLOW. The old mix (sin t*9 / t*23 / t*5 with +-5 on 12)
+// pulsed the wall/floor lighting ~40% at 1-4 Hz, which made the whole
+// background read as "shaking" (measured 20/255 mean change per frame on the
+// wall). Now it breathes like a flame, barely visible on the stonework.
 export function updateArena(arena, t) {
   for (const tc of arena.userData.torches || []) {
-    const n = Math.sin(t * 9 + tc.seed) * 0.5 + Math.sin(t * 23 + tc.seed * 2) * 0.3 + Math.sin(t * 5 + tc.seed) * 0.2;
-    tc.light.intensity = 12 + n * 5;
-    tc.flame.scale.y = 1 + n * 0.25;
-    tc.flame.scale.x = 1 - n * 0.12;
+    const n = Math.sin(t * 1.7 + tc.seed) * 0.5
+            + Math.sin(t * 3.1 + tc.seed * 2) * 0.3
+            + Math.sin(t * 0.9 + tc.seed) * 0.2;
+    tc.light.intensity = 13 + n * 1.5;
+    tc.flame.scale.y = 1 + n * 0.18;
+    tc.flame.scale.x = 1 - n * 0.09;
   }
 }

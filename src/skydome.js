@@ -4,13 +4,7 @@
 // Milky Way band, drifting cloud wisps that cross the BTC moon, shooting
 // stars. Each layer is individually updatable from scene.js's main loop.
 import * as THREE from '../vendor/three.module.js';
-
-function canvasTexture(c) {
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
-}
+import { canvasTexture } from './tex.js';
 
 // ---------- multi-stop gradient dome ----------
 // Deeper zenith, blue mid-sky, warm horizon-glow band: reads like a real

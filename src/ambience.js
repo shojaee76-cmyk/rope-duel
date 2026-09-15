@@ -49,8 +49,10 @@ export function buildSkyline(scene) {
 }
 
 // ---------- fireflies drifting over the courtyard ----------
+// v4: fewer + dimmer + slower blink. With the camera now CLOSE, the old
+// 70-particle constant bubbling read as background noise rather than ambience.
 export function buildFireflies(scene, scale = 1) {
-  const N = Math.round(70 * Math.max(0.25, Math.min(1, scale)));
+  const N = Math.round(44 * Math.max(0.25, Math.min(1, scale)));
   const pos = new Float32Array(N * 3);
   const seed = new Float32Array(N);
   const home = [];
@@ -75,7 +77,7 @@ export function buildFireflies(scene, scale = 1) {
         p.x += sin(uTime*0.5 + seed*7.0)*0.7;
         p.y += sin(uTime*0.8 + seed*13.0)*0.45;
         p.z += cos(uTime*0.6 + seed*5.0)*0.5;
-        vA = 0.25 + 0.75*pow(0.5+0.5*sin(uTime*1.8 + seed*20.0), 3.0);
+        vA = 0.18 + 0.52*pow(0.5+0.5*sin(uTime*1.15 + seed*20.0), 3.0);
         vec4 mv = modelViewMatrix * vec4(p,1.0);
         gl_PointSize = (2.0 + 1.5*sin(seed*3.0)) * (9.0/-mv.z) * 3.0;
         gl_Position = projectionMatrix * mv;
@@ -170,8 +172,10 @@ export function buildFountainWater(scene) {
 }
 
 // ---------- ambient ember drift near the torches ----------
+// v4: fewer + slower (same reason as the fireflies: the close framing makes
+// fast ambience particles read as instability)
 export function buildEmberDrift(scene, scale = 1) {
-  const N = Math.round(46 * Math.max(0.25, Math.min(1, scale)));
+  const N = Math.round(28 * Math.max(0.25, Math.min(1, scale)));
   const pos = new Float32Array(N * 3);
   const seed = new Float32Array(N);
   const torchXs = [-7.5, -2.7, 2.7, 7.5];
@@ -192,7 +196,7 @@ export function buildEmberDrift(scene, scale = 1) {
       attribute float seed; uniform float uTime; varying float vA;
       void main(){
         vec3 p = position;
-        float lt = mod(uTime*0.22 + seed, 3.0);          // life 0..3s
+        float lt = mod(uTime*0.15 + seed, 3.0);           // life 3s (slower rise)
         p.y += lt * 0.55;                                 // rise
         p.x += sin(uTime*1.3 + seed*3.0)*0.14 + lt*0.05;  // sway + drift
         vA = (1.0 - lt/3.0) * 0.85;

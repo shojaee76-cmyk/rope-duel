@@ -14,6 +14,7 @@ import { Crowd } from './crowd.js';
 import { FightDirector } from './director.js';
 import { buildSkyDome, buildStars, buildClouds, buildShootingStars } from './skydome.js';
 import { buildSkyline, buildFireflies, buildFountainWater, buildEmberDrift } from './ambience.js';
+import { setMaxAnisotropy } from './tex.js';
 
 export function createDuelScene(container, opts = {}) {
   // renderer / scene / camera (spec 1.1)
@@ -23,12 +24,17 @@ export function createDuelScene(container, opts = {}) {
   const desktopQuality = (opts.vfxScale || 1) > 0.5;
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, desktopQuality ? 2 : 1.25));
   renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
-  // v3: contact shadows ON (desktop) so the cats ground on the rope instead of
-  // floating against the sky. Mobile keeps the single-pass render.
-  renderer.shadowMap.enabled = desktopQuality;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // v4: shadow map OFF again. It cost ~40% of the frame budget and its
+  // re-render every frame speckled the FLOOR (the only receiver) with crawling
+  // PCF noise, which read as the background "shaking". Grounding is handled by
+  // the stronger moon key + short-throw rims instead.
+  renderer.shadowMap.enabled = false;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.35;
+  // v4: hand max anisotropy to the texture factory BEFORE any texture is
+  // built (the close framing shows the sebka/azulejo/grout patterns at a
+  // shallow angle, where 1x filtering shimmers)
+  setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -59,8 +65,10 @@ export function createDuelScene(container, opts = {}) {
   const ambient = new THREE.AmbientLight('#2A2438', 0.55);
   scene.add(ambient);
 
-  const rimA = new THREE.PointLight('#F5C542', 44, 9, 1.6);
-  const rimB = new THREE.PointLight('#7FD48A', 44, 9, 1.6);
+  // rim lights: v4 keeps their throw SHORT so swinging with the cats does not
+  // pump the illumination of the whole back wall (background shimmer)
+  const rimA = new THREE.PointLight('#F5C542', 34, 7, 1.6);
+  const rimB = new THREE.PointLight('#7FD48A', 34, 7, 1.6);
   scene.add(rimA, rimB);
 
   const fill = new THREE.SpotLight('#FFD9A0', 95, 26, 0.75, 0.6, 1.4);
@@ -80,12 +88,6 @@ export function createDuelScene(container, opts = {}) {
   catA.x = 1.4;
   catB.x = -1.4;
   scene.add(catA.root, catB.root);
-  // v3: cast contact shadows (desktop quality only) so the duelists sit ON the rope
-  if (desktopQuality) {
-    for (const cat of [catA, catB]) {
-      cat.root.traverse((o) => { if (o.isMesh && o.material && o.material.transparent !== true) o.castShadow = true; });
-    }
-  }
 
   const arena = buildArena(scene);
   const vfx = new VFX(scene, opts.vfxScale || 1);
@@ -121,6 +123,7 @@ export function createDuelScene(container, opts = {}) {
   // event hooks: VFX + screen shake (spec 7.3 VFX column, 7.4)
   const shake = { t: 0, amp: 0 };
   let slowmo = 0;
+  let camPan = 0;         // low-pass filtered fighter midpoint (v4: no snapping)
   function clampFoe(x) {
     const lim = DIM.spanHalf - DIM.poleClearance;
     return THREE.MathUtils.clamp(x, -lim, lim);
@@ -315,8 +318,10 @@ export function createDuelScene(container, opts = {}) {
 
     // ---- v2 ambience update ----
     amb.moonPulse = Math.max(0, amb.moonPulse - dt * 0.55);
-    amb.mouse.x += (amb.mouseT.x - amb.mouse.x) * Math.min(1, dt * 3);
-    amb.mouse.y += (amb.mouseT.y - amb.mouse.y) * Math.min(1, dt * 3);
+    // dead-zone + slower easing: only real pointer movement sways the camera
+    const dz = (v) => (Math.abs(v) < 0.07 ? 0 : (v - Math.sign(v) * 0.07) / 0.93);
+    amb.mouse.x += (dz(amb.mouseT.x) - amb.mouse.x) * Math.min(1, dt * 1.8);
+    amb.mouse.y += (dz(amb.mouseT.y) - amb.mouse.y) * Math.min(1, dt * 1.8);
     if (amb.stars) amb.stars.update(simTime);
     if (amb.clouds) amb.clouds.update(simTime, dt);
     if (amb.shoot) amb.shoot.update(simTime, dt, amb.moonPulse);
@@ -333,19 +338,21 @@ export function createDuelScene(container, opts = {}) {
     }
 
     // camera: CLOSE shot on the cats + gentle drift + shake + mouse parallax.
-    // v3: pulled in from z=11 to z=7.2, tilted up so the open sky reads, and
-    // panned slightly toward the midpoint of the two fighters so a close
-    // framing never loses them as pressure swings the duel off-center.
+    // v4: the fighter-follow pan is now heavily low-passed (a stumble used to
+    // teleport a cat 0.5 units and snap the whole background with it), the
+    // parallax has a dead zone so tiny pointer moves can't jitter the frame,
+    // and the idle drift is gentler.
     const shk = Math.max(shake.t, 0);
     if (shk > 0) shake.t -= rawDt;
     const s = (shk / 0.1) * shake.amp;
-    const panX = (catA.x + catB.x) * 0.42;
+    camPan += ((catA.x + catB.x) * 0.3 - camPan) * Math.min(1, dt * 1.4);
+    const mz = (v) => (Math.abs(v) < 0.07 ? 0 : (v - Math.sign(v) * 0.07) / 0.93);
     camera.position.set(
-      panX + Math.sin(simTime * 0.11) * 0.45 + (Math.random() - 0.5) * s + amb.mouse.x * 0.7,
-      2.55 + Math.sin(simTime * 0.07) * 0.2 + (Math.random() - 0.5) * s - amb.mouse.y * 0.4,
+      camPan + Math.sin(simTime * 0.09) * 0.18 + (Math.random() - 0.5) * s + amb.mouse.x * 0.5,
+      2.55 + Math.sin(simTime * 0.06) * 0.1 + (Math.random() - 0.5) * s - amb.mouse.y * 0.3,
       6.8
     );
-    camera.lookAt(panX * 0.85, 3.15, 0);
+    camera.lookAt(camPan * 0.85, 3.15, 0);
 
     renderer.render(scene, camera);
   }

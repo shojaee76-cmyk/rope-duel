@@ -2,6 +2,8 @@ node_modules/
 vendor/
 smoke_*.mjs
 verify_live_v2.mjs
+stab*.mjs
+stab*.png
 smoke_v2.png
 _*.png
 live_shot.png
