@@ -30,12 +30,12 @@ class RopeTube {
     // laid-rope look: the radius pulses once per twist so the grooves in the
     // hemp texture sit in a real valley (bulgeCount matches tex.js twists x
     // texture repeats, i.e. 2 twists x 8 tiles = 16)
-    this.bulge = 0.075;
+    this.bulge = 0.12;
     this.bulgeCount = 8;
     // strand lay: a rotating elliptical cross-section. This is the cue that
     // survives at 35 px on screen (and in any silhouette test): the rope's
     // outline visibly walks in and out as the strands wrap around it.
-    this.lay = 0.13;
+    this.lay = 0.2;   // deliberately exaggerated: a stylised rope must read as laid
     const rings = this.T + 1, radial = this.R + 1;
     this.count = rings * radial;
     this.pos = new Float32Array(this.count * 3);

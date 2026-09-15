@@ -82,6 +82,7 @@ export class FightDirector {
     this.lastMoveAt = 0;
     this.stats = { moves: 0, clashes: 0, locks: 0, hits: 0 };
     this.busyUntil = 0;            // no new move while a lock/clash beat plays
+    this.lockCool = 0;             // minimum spacing between blade locks
     this._beats = [];              // timed callbacks (slow-mo safe, no setTimeout)
     this.engage = 0;               // 0..1 how committed the brawl is right now
   }
@@ -344,7 +345,7 @@ export class FightDirector {
     cat.setState(move, spec.len, data);
     // the opponent reacts: parry or counter, which is what makes clashes happen
     const foe = side === 'A' ? 'B' : 'A';
-    if (OFFENSIVE.has(move) && !this.active[foe] && Math.random() < 0.72) {
+    if (OFFENSIVE.has(move) && !this.active[foe] && Math.random() < 0.5) {
       const def = foe === 'B' ? 'PARRY_HOP' : 'LUNGE';
       if (this._canMove(foe, def)) {
         this._start(foe, def, { dir: this._fw(foe) });
@@ -385,11 +386,14 @@ export class FightDirector {
     const foeSide = side === 'A' ? 'B' : 'A';
     const foe = this.cats[foeSide];
     if (this.now < this.busyUntil) return false;
+    // A lock is a highlight, not the default outcome: on the live tape the old
+    // always-lock rule kept the cats welded together for ~43% of all frames.
+    if (this.now < this.lockCool) return false;
     const defMove = foe.state.name;
     const canParry = DEFENSIVE.has(defMove) || OFFENSIVE.has(defMove);
     const near = this.gap < 1.75;
     if (!near) return false;
-    if (!canParry && Math.random() > 0.25) return false;
+    if (Math.random() > (canParry ? 0.6 : 0.18)) return false;
     // winner = current pressure favours that side
     const winner = this.pressure > 0.02 ? 'A' : this.pressure < -0.02 ? 'B' : (Math.random() < 0.5 ? 'A' : 'B');
     this._beginLock(winner);
@@ -422,6 +426,12 @@ export class FightDirector {
       this.cats.B.setState('RECOVER', 0.2);
       delete this.active.A; delete this.active.B;
       this.lastMoveAt = this.now;
+      this.lockCool = this.now + 2.2;
+      // always break apart after a lock: charge -> clash -> disengage -> circle
+      this.phase = 'break';
+      this.phaseT = 0;
+      this.phaseDur = 0.5 + Math.random() * 0.5;
+      this.gapTarget = 2.1 + Math.random() * 0.7;
       // follow-up: the winner gets an immediate extra attack (momentum)
       this._after(0.05, () => {
         const mv = winner === 'A' ? 'RUSH' : 'SLASH_SPIN';

@@ -112,16 +112,25 @@ export function furCanvas({ seed = 3, stripes = 0, blotch = 0, grain = 0.10, bas
     g.globalAlpha = 1;
   }
   if (stripes) {
+    // Tabby markings are IRREGULAR: thickness, offset and density all wander,
+    // and each stripe breaks into segments. (Uniform ellipse chains read as
+    // blocky zebra bands - an art-director review caught exactly that.)
     for (let i = 0; i < stripes; i++) {
-      const y = (i + 0.5) * (size / stripes) + (rnd() - 0.5) * 10;
-      const h = 12 + rnd() * 16;
-      g.fillStyle = dark;
-      g.globalAlpha = 0.62 + rnd() * 0.28;
-      for (let x = -20; x < size + 20; x += 8) {
-        const yy = y + Math.sin(x * 0.045 + i) * 9;
+      const baseY = (i + 0.5) * (size / stripes) + (rnd() - 0.5) * 14;
+      const drift = 8 + rnd() * 10;
+      let x = -24 - rnd() * 30;
+      while (x < size + 24) {
+        const gap = rnd() < 0.29 ? 6 + rnd() * 22 : 0;      // broken markings
+        x += gap;
+        const seg = 16 + rnd() * 40;                        // segment length
+        const h = (size / stripes) * (0.22 + rnd() * 0.34);  // variable thickness
+        const yy = baseY + Math.sin(x * 0.035 + i * 1.7) * drift;
+        g.fillStyle = dark;
+        g.globalAlpha = 0.34 + rnd() * 0.3;
         g.beginPath();
-        g.ellipse(x, yy, 13, h * 0.5, 0.5, 0, Math.PI * 2);
+        g.ellipse(x + seg / 2, yy, seg / 2 + 6, h / 2, (rnd() - 0.5) * 0.22, 0, Math.PI * 2);
         g.fill();
+        x += seg;
       }
     }
     g.globalAlpha = 1;
@@ -159,10 +168,10 @@ export function furTexture(opts = {}) {
 }
 
 // ---------- cloth ----------
-export function clothCanvas({ seed = 5, base = '#ffffff', thread = 'rgba(70,60,50,0.30)', weave = 8 } = {}) {
+export function clothCanvas({ seed = 5, base = '#ffffff', thread = 'rgba(64,54,44,0.46)', weave = 10 } = {}) {
   const { c, g, size } = surface(128, base);
   g.strokeStyle = thread;
-  g.lineWidth = 1.4;
+  g.lineWidth = 2.0;
   for (let i = 0; i < size; i += weave) {
     g.beginPath(); g.moveTo(i, 0); g.lineTo(i, size); g.stroke();
     g.beginPath(); g.moveTo(0, i); g.lineTo(size, i); g.stroke();
@@ -170,12 +179,12 @@ export function clothCanvas({ seed = 5, base = '#ffffff', thread = 'rgba(70,60,5
   // diagonal twill shadow (the threads catch light at an angle)
   const rnd = prng(seed);
   for (let i = -size; i < size; i += weave) {
-    g.strokeStyle = 'rgba(255,255,255,0.16)';
+    g.strokeStyle = 'rgba(255,255,255,0.24)';
     g.beginPath(); g.moveTo(i, 0); g.lineTo(i + size, size); g.stroke();
   }
   for (let i = 0; i < 420; i++) {
-    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.14)' : 'rgba(40,34,30,0.14)';
-    g.fillRect(rnd() * size, rnd() * size, 2, 1);
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.20)' : 'rgba(40,34,30,0.20)';
+    g.fillRect(rnd() * size, rnd() * size, 3, 2);
   }
   return c;
 }

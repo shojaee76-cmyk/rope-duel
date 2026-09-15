@@ -237,8 +237,23 @@ function buildScimitar() {
 function buildCape() {
   const clothPair = tex('cloth-crimson', () => clothTexture({ seed: 52, weave: 6 }));
   const matOut = std(CAT_A.crimsonMain, 'cloth', { side: THREE.DoubleSide }, clothPair);
-  const geo = new THREE.PlaneGeometry(0.52, 0.78, 6, 6);
+  const geo = new THREE.PlaneGeometry(0.52, 0.78, 10, 12);
   geo.translate(0, -0.39, 0);
+  // baked folds: a flat sheet always reads as plastic, no matter the texture.
+  // Displace the surface with layered folds that deepen toward the hem.
+  {
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      const depth = Math.max(0, Math.min(1, -y / 0.78));
+      const fold = Math.sin(x * 15.0) * 0.016
+        + Math.sin(x * 26.0 + y * 8.0) * 0.009
+        + Math.sin(y * 17.0 + x * 4.0) * 0.012
+        + Math.sin(x * 6.0) * 0.02;
+      pos.setZ(i, fold * depth * 1.7);
+    }
+    geo.computeVertexNormals();
+  }
   const cape = new THREE.Mesh(geo, matOut);
   cape.castShadow = true;
   const trim = new THREE.Mesh(new THREE.PlaneGeometry(0.54, 0.06), std(CAT_A.goldBright, 'cloth', { side: THREE.DoubleSide }));
@@ -320,13 +335,24 @@ export function buildDonGato() {
     const p = mesh(new THREE.SphereGeometry(0.075, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), MA.gold, 0.08, 0.46, sz);
     p.rotation.z = sz > 0 ? -0.5 : 0.5;
     rig.spine.add(p);
+    // strap over the shoulder so the pauldron reads as worn armour
+    const strap = mesh(torus(0.082, 0.013, Math.PI * 1.15), std(CAT_A.leatherBrown, 'cloth'), 0.05, 0.45, sz);
+    strap.rotation.y = Math.PI / 2;
+    strap.rotation.z = -0.35;
+    rig.spine.add(strap);
   }
 
-  // cape on the back (local -x), hangs to hock level
+  // cape on the back (local -x), hangs to hock level, held by a gold collar
   const cape = buildCape();
   cape.position.set(-0.14, 0.5, 0);
   cape.rotation.y = 0.22;
   rig.spine.add(cape);
+  const collar = mesh(torus(0.155, 0.018), MA.gold, 0.02, 0.52, 0);
+  collar.rotation.x = Math.PI / 2;
+  collar.rotation.z = 0.1;
+  collar.scale.set(1.05, 0.9, 1);
+  rig.spine.add(collar);
+  rig.spine.add(mesh(sphere(0.038, 10, 8), MA.goldBright, 0.16, 0.5, 0));
 
   // tabard skirt with tail slit + gold fringe belt + bracers/shin guards
   const tab = mesh(new THREE.CylinderGeometry(0.14, 0.19, 0.22, 10, 1, true, 0.5, Math.PI * 1.6), MA.crimson, -0.02, -0.08, 0);
@@ -364,7 +390,7 @@ export function buildSultanBigotes() {
     // the field between the stripes, so the coat keeps the charcoal body with
     // real silver bands instead of one flat dark slab
     furKey: 'B-fur',
-    furOpts: { seed: 9, stripes: 7, grain: 0.16, blotch: 2, dark: '#3d3d46', repeatX: 1.4, repeatY: 1.4 },
+    furOpts: { seed: 9, stripes: 7, grain: 0.16, blotch: 2, dark: '#6c6c78', repeatX: 1.4, repeatY: 1.4 },
     furBase: CAT_B.furSilverStripe, furBelly: CAT_B.furBelly, earInner: CAT_B.noseBlack,
     eye: CAT_B.eyeJade, eyeGlow: 0.3, nose: CAT_B.noseBlack
   });
@@ -999,7 +1025,7 @@ export class DuelCat {
     for (let i = 0; i < pos.count; i++) {
       const bx = base[i * 3], by = base[i * 3 + 1];
       const depth = clamp(-by / 0.78, 0, 1);
-      const wave = Math.sin(t * 4.2 + depth * 5) * 0.075 * depth;
+      const wave = Math.sin(t * 4.2 + depth * 5) * 0.11 * depth;
       pos.setX(i, bx * (1 + raise * depth * 1.8) + wave * 0.4);
       pos.setZ(i, wave);
     }

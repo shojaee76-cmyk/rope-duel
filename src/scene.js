@@ -287,6 +287,21 @@ export function createDuelScene(container, opts = {}) {
     director.update(dt);
     catA.update(dt, ctx);
     catB.update(dt, ctx);
+    // hard floor on the RENDERED separation: body offsets (lunge reach, hit
+    // reels, tumbles) can eat the whole gap and leave the two cats standing
+    // inside each other, so nudge the base positions apart when that happens.
+    {
+      const MIN_RENDERED = 0.68;
+      const ax = catA.x + catA.pose.xOff, bx = catB.x + catB.pose.xOff;
+      const d = ax - bx;
+      const gapN = Math.abs(d);
+      if (gapN < MIN_RENDERED) {
+        const sgn = d >= 0 ? 1 : -1;
+        const push = (MIN_RENDERED - gapN) / 2;
+        catA.x += sgn * push;
+        catB.x -= sgn * push;
+      }
+    }
     rope.updateVisual();
 
     flag.update(dt, rope);
