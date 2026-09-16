@@ -627,7 +627,10 @@ export function createDuelScene(container, opts = {}) {
     if (amb.clouds) amb.clouds.update(simTime, dt);
     if (amb.shoot) amb.shoot.update(simTime, dt, amb.moonPulse);
     if (amb.fireflies) amb.fireflies.update(simTime);
-    if (amb.water) amb.water.update(simTime, dt);
+    if (amb.water) {
+      amb.water.setPressure(director.pressure); // v16: water tints with the live tape
+      amb.water.update(simTime, dt);
+    }
     if (amb.embers) amb.embers.update(simTime);
 
     // BTC moon: halo breathes with trading activity, flare on big events.
