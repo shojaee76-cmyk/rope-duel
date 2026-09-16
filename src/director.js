@@ -507,7 +507,7 @@ export class FightDirector {
   }
 
   _startPair(move) {
-    // Fountain Fumble: both cats tumble toward center, flag spins, coin pops
+    // Pair stumble: both cats tumble toward center, flag spins
     const dur = move === 'STUMBLE' ? 1.6 : 1.2;
     this.stumbling = true;
     this.active.A = move; this.active.B = move;
@@ -521,11 +521,6 @@ export class FightDirector {
       if (this.vfx) {
         this.vfx.dustBurst({ x: mid, y: Math.max(y - 0.4, 0.4), z: 0.2 });
         this.vfx.furTuft({ x: mid + 0.3, y: y + 0.2, z: 0.1 });
-        const coins = this.arena.userData.coins ? this.arena.userData.coins() : [];
-        if (coins && coins[0]) {
-          const c = coins[Math.floor(Math.random() * coins.length)];
-          this.vfx.coinPop({ x: c.position.x, y: c.position.y + 0.4, z: c.position.z });
-        }
       }
       if (this.flag) this.flag.spin = 1.5;
     });

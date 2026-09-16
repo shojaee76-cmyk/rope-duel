@@ -1,5 +1,5 @@
-// The Courtyard of the Two Poles: tiled floor with the duel medallion, dry
-// fountain, BTC moon, torches, moonlit parapet (spec 5).
+// The Courtyard of the Two Poles: tiled floor with the duel medallion,
+// BTC moon, torches, moonlit parapet (spec 5). (Fountain removed in v17.)
 //
 // v5: the five giant round arch hoops are GONE (user: "the circles on the
 // background are laggy and ugly, you can delete it"). They cost ~110 draw calls
@@ -254,7 +254,6 @@ export function buildArena(scene) {
   scene.add(arena);
   const groups = { torches: [] };
   arena.userData.torches = groups.torches;
-  arena.userData.coins = () => groups.coins;
 
   // ---- BTC moon (the loop in scene.js owns its screen slot each frame: the
   // world-fixed position here only feeds the very first frame) ----
@@ -353,128 +352,7 @@ export function buildArena(scene) {
   ground.position.set(0, -0.02, 0);
   arena.add(ground);
 
-  // ---- two-tier marble fountain at z = -3 (v16) ----
-  // The old one was a flat octagonal tub: two cylinders, no spout, no water
-  // surface, no ornament. This is a proper courtyard centerpiece: stepped
-  // octagonal plinth, wide lower basin with a real water disc, narrow pedestal,
-  // upper bowl, and an azulejo-zellij star inlay inside the basin floor. The
-  // water itself lives in ambience.js (jets + ripples + moonlit sparkle) and
-  // is tinted by the LIVE tape pressure: BUY green / SELL red.
-  const fountain = new THREE.Group();
-  fountain.position.set(0, 0, -3);
-  const basinPair = stoneTexture({ seed: 63, base: '#ffffff', blocks: 2, alpha: 0.18, repeatX: 2, repeatY: 1 });
-  const basinMat = texed(ARENA.stoneShadow, 'cloth', basinPair, { bumpScale: 0.1 });
-  // marble rim highlight (cool white catching the moon) - v16.1: real stone
-  // grain + bump so the tiers shade instead of reading as flat plastic
-  const marblePair = stoneTexture({ seed: 77, base: '#ffffff', blocks: 1, alpha: 0.14, speckle: 900, repeatX: 2, repeatY: 1 });
-  const marbleMat = texed('#CFC9BE', 'cloth', marblePair, { roughness: 0.62, metalness: 0.05, bumpScale: 0.05 });
-  const marbleDark = texed('#8E8A80', 'cloth', stoneTexture({ seed: 78, base: '#ffffff', blocks: 1, alpha: 0.2, speckle: 1100, repeatX: 2, repeatY: 1 }), { roughness: 0.7, bumpScale: 0.06 });
-  // cheap AO: dark discs that sit under overhangs, grounding the tiers
-  const aoTexC = document.createElement('canvas');
-  aoTexC.width = aoTexC.height = 128;
-  {
-    const g = aoTexC.getContext('2d');
-    const grd = g.createRadialGradient(64, 64, 8, 64, 64, 62);
-    grd.addColorStop(0, 'rgba(0,0,0,0.55)');
-    grd.addColorStop(0.7, 'rgba(0,0,0,0.28)');
-    grd.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
-  }
-  const aoTex = canvasTexture(aoTexC);
-  const aoMat = new THREE.MeshBasicMaterial({ map: aoTex, transparent: true, depthWrite: false });
-  const aoDisc = (r, x, y, z, op) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2), aoMat.clone());
-    m.material.opacity = op;
-    m.rotation.x = -Math.PI / 2; m.position.set(x, y, z);
-    return m;
-  };
-
-  // stepped octagonal plinth (recessed footing, reads as depth from the dueling rope)
-  fountain.add(mesh(new THREE.CylinderGeometry(1.85, 2.0, 0.18, 8), marbleDark, 0, 0.09, 0));
-  // azulejo band around the plinth drum: the same eight-point star language as
-  // the dado and the basin inlay, tying the fountain into the courtyard design
-  const bandC = document.createElement('canvas');
-  bandC.width = 256; bandC.height = 64;
-  {
-    const g = bandC.getContext('2d');
-    g.fillStyle = '#F2EFE9'; g.fillRect(0, 0, 256, 64);
-    // dark grout lines top/bottom so the band reads as tiles, not paint
-    g.fillStyle = '#0E2E36'; g.fillRect(0, 0, 256, 5); g.fillRect(0, 59, 256, 5);
-    for (let i = 0; i < 4; i++) { // FOUR big stars - fine patterns vanish at arena distance
-      const cx = 32 + i * 64;
-      g.strokeStyle = '#0E2E36'; g.lineWidth = 3;
-      g.strokeRect(cx - 30, 6, 60, 52);
-      for (const [col, rot] of [['#1F5FA8', 0], ['#12755F', Math.PI / 8]]) {
-        g.fillStyle = col; g.beginPath();
-        for (let k = 0; k < 8; k++) {
-          const a1 = rot + (k / 8) * Math.PI * 2;
-          const a2 = a1 + Math.PI / 8;
-          g.lineTo(cx + Math.cos(a1) * 22, 32 + Math.sin(a1) * 22);
-          g.lineTo(cx + Math.cos(a2) * 9, 32 + Math.sin(a2) * 9);
-        }
-        g.closePath(); g.fill();
-      }
-    }
-  }
-  const bandTex = canvasTexture(bandC, { repeatX: 2, repeatY: 1 });
-  const bandMat = new THREE.MeshStandardMaterial({ map: bandTex, roughness: 0.45 });
-  fountain.add(mesh(new THREE.CylinderGeometry(1.72, 1.78, 0.28, 8), bandMat, 0, 0.29, 0));
-  // wide lower basin: outer wall with a rolled lip + inner water floor
-  fountain.add(mesh(new THREE.CylinderGeometry(1.62, 1.78, 0.42, 8), basinMat, 0, 0.39, 0));
-  fountain.add(mesh(new THREE.CylinderGeometry(1.78, 1.78, 0.09, 8), marbleMat, 0, 0.615, 0)); // lip
-  // basin floor: azulejo star inlay (eight-point star, BUY/SELL split - the
-  // same convention as the duel medallion) glinting under the water
-  const inlayC = document.createElement('canvas');
-  inlayC.width = inlayC.height = 256;
-  {
-    const g = inlayC.getContext('2d');
-    g.fillStyle = '#123A44'; g.fillRect(0, 0, 256, 256);
-    const star = (cx, cy, R, colA, colB, rot) => {
-      for (const [col, a0] of [[colA, 0], [colB, Math.PI]]) {
-        g.fillStyle = col; g.beginPath();
-        for (let i = 0; i < 8; i++) {
-          const a1 = a0 + rot + (i / 8) * Math.PI * 2;
-          const a2 = a1 + Math.PI / 8;
-          g.lineTo(cx + Math.cos(a1) * R, cy + Math.sin(a1) * R);
-          g.lineTo(cx + Math.cos(a2) * R * 0.42, cy + Math.sin(a2) * R * 0.42);
-        }
-        g.closePath(); g.fill();
-      }
-    };
-    star(128, 128, 108, '#35D07F', '#FF8A80', Math.PI / 8);   // BUY tip = A pole side
-    star(128, 128, 62, '#0E2E36', '#0E2E36', 0);              // teal center hub
-    star(128, 128, 30, '#B08D57', '#B08D57', Math.PI / 8);    // gold boss at the spout foot
-  }
-  const inlayTex = canvasTexture(inlayC);
-  const inlayMat = new THREE.MeshStandardMaterial({ map: inlayTex, roughness: 0.3, metalness: 0.1 });
-  fountain.add(mesh(new THREE.CylinderGeometry(1.42, 1.42, 0.04, 8), inlayMat, 0, 0.52, 0));
-  // narrow pedestal + upper bowl
-  fountain.add(mesh(new THREE.CylinderGeometry(0.30, 0.42, 0.62, 8), basinMat, 0, 0.95, 0));
-  fountain.add(mesh(new THREE.CylinderGeometry(0.62, 0.5, 0.16, 8), marbleMat, 0, 1.3, 0));   // bowl foot flare
-  fountain.add(mesh(new THREE.CylinderGeometry(0.68, 0.56, 0.22, 8), basinMat, 0, 1.46, 0));  // upper bowl
-  fountain.add(mesh(new THREE.CylinderGeometry(0.68, 0.68, 0.06, 8), marbleMat, 0, 1.59, 0)); // bowl lip
-  fountain.add(mesh(new THREE.CylinderGeometry(0.56, 0.56, 0.03, 8), inlayMat, 0, 1.52, 0));  // bowl water floor
-  // finial the main jet rises from
-  fountain.add(mesh(new THREE.CylinderGeometry(0.09, 0.14, 0.14, 8), marbleMat, 0, 1.7, 0));
-  // AO contact shadows: under the lip, under the bowl, around the plinth
-  fountain.add(aoDisc(1.62, 0, 0.195, 0, 0.5));   // plinth on the paving
-  fountain.add(aoDisc(0.62, 0, 0.75, 0, 0.4));    // pedestal mid-shade
-  fountain.add(aoDisc(1.5, 0, 0.635, 0, 0.35));   // under the basin lip (inside water)
-  fountain.add(aoDisc(0.72, 0, 1.235, 0, 0.45));  // upper bowl shading the pedestal top
-
-  // a few glinting copper coins on the lower basin floor
-  const coinMat = std('#B08D57', 'gold', { metalness: 0.9, roughness: 0.35 });
-  const coins = [];
-  for (let i = 0; i < 7; i++) {
-    const a = Math.random() * Math.PI * 2, r = Math.random() * 1.0;
-    const coin = mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 12), coinMat,
-      Math.cos(a) * r, 0.55, Math.sin(a) * r);
-    coin.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.4;
-    fountain.add(coin);
-    coins.push(coin);
-  }
-  arena.add(fountain);
-  groups.coins = coins;
+  // (the fountain that stood here was removed in v17 - open courtyard now)
 
   // ---- stone poles at x = +/-10 with cap stones ----
   const polePair = stoneTexture({ seed: 64, base: '#ffffff', blocks: 3, alpha: 0.14, repeatX: 1, repeatY: 3 });

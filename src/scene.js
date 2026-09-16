@@ -18,7 +18,7 @@ import { VFX } from './vfx.js';
 import { Crowd } from './crowd.js';
 import { FightDirector } from './director.js';
 import { buildSkyDome, buildStars, buildClouds, buildShootingStars } from './skydome.js';
-import { buildSkyline, buildFireflies, buildFountainWater, buildEmberDrift } from './ambience.js';
+import { buildSkyline, buildFireflies, buildEmberDrift } from './ambience.js';
 import { createSkyChart } from './skychart.js';
 import { setMaxAnisotropy } from './tex.js';
 
@@ -95,7 +95,7 @@ export function createDuelScene(container, opts = {}) {
     mouse: { x: 0, y: 0 },
     mouseT: { x: 0, y: 0 },
     moonPulse: 0,
-    shoot: null, clouds: null, stars: null, fireflies: null, water: null, embers: null,
+    shoot: null, clouds: null, stars: null, fireflies: null, embers: null,
   };
   buildSkyDome(scene);
   amb.stars = buildStars(scene);
@@ -103,7 +103,6 @@ export function createDuelScene(container, opts = {}) {
     amb.clouds = buildClouds(scene);
     amb.shoot = buildShootingStars(scene);
     amb.fireflies = buildFireflies(scene, amb.vfxScale);
-    amb.water = buildFountainWater(scene);
     amb.embers = buildEmberDrift(scene, amb.vfxScale);
   }
   buildSkyline(scene);
@@ -627,10 +626,6 @@ export function createDuelScene(container, opts = {}) {
     if (amb.clouds) amb.clouds.update(simTime, dt);
     if (amb.shoot) amb.shoot.update(simTime, dt, amb.moonPulse);
     if (amb.fireflies) amb.fireflies.update(simTime);
-    if (amb.water) {
-      amb.water.setPressure(director.pressure); // v16: water tints with the live tape
-      amb.water.update(simTime, dt);
-    }
     if (amb.embers) amb.embers.update(simTime);
 
     // BTC moon: halo breathes with trading activity, flare on big events.

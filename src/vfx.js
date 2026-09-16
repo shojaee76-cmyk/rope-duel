@@ -1,5 +1,5 @@
 // Combat VFX: green sparks / embers for A (BUY), silver / red ghosts for B
-// (SELL), dust for stumbles, coin pop from the fountain (spec 7.3 VFX + section
+// (SELL), dust for stumbles (spec 7.3 VFX + section
 // 8). Side hues follow the buy=green / sell=red convention (task t_167a53f3).
 import * as THREE from '../vendor/three.module.js';
 import { CAT_A, CAT_B, ARENA, SIDE } from './palette.js';
@@ -114,7 +114,6 @@ export class VFX {
   ghostTile(p) { this.jade.spawn(p.x, p.y, p.z, 0.8, 0.6, 6, SIDE.SELL_DEEP); }
   dustBurst(p) { this.dust.spawn(p.x, p.y, p.z, 2.2, 1.8, 16); }
   furTuft(p) { this.fur.spawn(p.x, p.y, p.z, 0.6, 0.4, 5); }
-  coinPop(p) { this.sparksGold.spawn(p.x, p.y, p.z, 1.5, 3.5, 8, '#B08D57'); }
 
   update(dt) {
     for (const pool of [this.sparksGold, this.sparksSilver, this.embers, this.jade, this.dust, this.fur]) pool.update(dt);
