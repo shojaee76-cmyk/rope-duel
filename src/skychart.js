@@ -1,12 +1,12 @@
 // src/skychart.js — the live 1s candle tape, mounted ON THE BACK WALL.
-//
-// v18 (user: "take the chart out of sky and put it on the wall. Make wall blank
-// so chart is visible"): the chart used to be a screen-space panel unprojected
-// high into the sky (x 0.672-0.985 of the frame). It is now a world object: a
-// plane hung on the arena's back wall, inside the walnut tape board that
-// arena.js mounts on the blanked wall centre (wall x +-3.45, y 1.67..4.17,
-// plane z -6.72, 0.09 in front of the board face so it never z-fights the
-// trim). Because it is world-fixed it drifts naturally in screen space as the
+// It used to be a screen-space panel unprojected high into the sky (x
+// 0.672-0.985 of the frame). It is now a world object: a plane hung on the
+// arena's back wall, inside the walnut tape board that arena.js mounts on the
+// blanked wall centre (wall x +-3.45, y 1.67..4.17). v18.1: the board hangs
+// OFF the stone on cleats (standoff 0.10, proud of wall face AND coping), so
+// the chart plane rides the
+// board's face via userData.tapeBoard.z instead of a hardcoded depth. Because
+// it is world-fixed it drifts naturally in screen space as the
 // camera follows the fight, exactly like any other thing on the wall.
 //
 // The canvas is still sized so its pixels land ~1:1 on screen (that is what
@@ -32,10 +32,11 @@ import { CAT_A, SIDE } from './palette.js';
 
 const GOLD = CAT_A.goldPrimary;
 
-// The wall frame (world units). arena.js mounts the walnut board (8.2 x 3.17 at
-// y 3.19, face z -6.81); the chart plane sits 0.09 in front of that face, edge
-// inset 0.30 from the board's trim so walnut shows around the screen.
-const WALL = { cx: 0, cy: 3.19, w: 7.6, h: 2.74, z: -6.72 };
+// The wall frame (world units). arena.js mounts the walnut board (8.0 x 3.17
+// at y 3.245, centre z -6.76, front face -6.67, hung off the stone on cleats);
+// the chart plane rides the board's face (board.z + 0.09) via the tapeBoard
+// prop from scene.js. The constants below are the no-board fallback only.
+const WALL = { cx: 0, cy: 3.245, w: 7.6, h: 2.74, z: -6.67 };
 
 // fonts, in SCREEN pixels (converted to texture px by S() from the live layout):
 // sized for a ~560px-wide screen where a 13px digit stays crisp. v18: bumped

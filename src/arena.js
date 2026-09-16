@@ -316,7 +316,17 @@ export function buildArena(scene) {
   // Kept clear of the pier torches (flame tips reach y 4.02 at x +-4.6; the
   // board top sits above them) and sized so the camera's centre ray, which
   // lands at wall height ~2.66, hits the candles band.
-  const BOARD_W = 8.2, BOARD_H = 3.17;
+  // v18.1: the board hangs OFF the wall face on two cleats (user: "the chart
+  // is collide with the wall. Pull it a little closer" - the v18 board's back
+  // was sunk 0.04 INTO the stone and the coping front (-6.87) cut through the
+  // board's back half). Now the whole assembly is proud of every wall slice:
+  // wall face -6.95 / coping front -6.87 -> 0.24 shadow gap -> board back
+  // -6.71 (centre -6.62, front -6.53); the chart plane rides the board face
+  // via userData.tapeBoard.z. Width 8.0 keeps the trim clear of the pier
+  // inner faces (x 4.05 < 4.1) so nothing intersects the piers either.
+  const BOARD_W = 8.0, BOARD_H = 3.17, BOARD_STANDOFF = 0.24;
+  const wallFaceZ = wallZ + 0.25;
+  const boardZ = wallFaceZ + BOARD_STANDOFF + 0.09;   // board centre depth
   const walnutPair = clothTexture({ seed: 91, weave: 14, thread: 'rgba(30,18,8,0.5)' });
   walnutPair.map.wrapS = walnutPair.map.wrapT = THREE.RepeatWrapping;
   walnutPair.map.repeat.set(3, 1.2);
@@ -325,39 +335,42 @@ export function buildArena(scene) {
     bumpScale: 0.04, roughness: 0.62, metalness: 0.05
   });
   const boardY = dadoH + friezeH + BOARD_H / 2 + 0.06;   // 3.11
-  const board = mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, 0.18), boardMat, 0, boardY, wallZ + 0.30);
+  const board = mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, 0.18), boardMat, 0, boardY, boardZ);
   arena.add(board);
-  // frame trim: slightly proud edge so the board reads as carpentry, not a decal
+  // frame trim: a DEEP shadowbox edge (0.26 > board 0.18) so the screen sits
+  // recessed inside the frame and the frame reads as proud carpentry
   const trimMat2 = new THREE.MeshStandardMaterial({ color: '#3E2712', roughness: 0.55 });
-  arena.add(mesh(new THREE.BoxGeometry(BOARD_W + 0.14, 0.1, 0.20), trimMat2, 0, boardY + BOARD_H / 2 + 0.04, wallZ + 0.30));
-  arena.add(mesh(new THREE.BoxGeometry(BOARD_W + 0.14, 0.1, 0.20), trimMat2, 0, boardY - BOARD_H / 2 - 0.04, wallZ + 0.30));
-  arena.add(mesh(new THREE.BoxGeometry(0.1, BOARD_H + 0.14, 0.20), trimMat2, -(BOARD_W / 2 + 0.04), boardY, wallZ + 0.30));
-  arena.add(mesh(new THREE.BoxGeometry(0.1, BOARD_H + 0.14, 0.20), trimMat2, +(BOARD_W / 2 + 0.04), boardY, wallZ + 0.30));
-  // two cleats angle it off the stone (visible from below, sells the mount)
-  arena.add(mesh(new THREE.BoxGeometry(0.09, 0.32, 0.10), trimMat2, -BOARD_W / 2 + 0.5, boardY - BOARD_H / 2 - 0.14, wallZ + 0.14));
-  arena.add(mesh(new THREE.BoxGeometry(0.09, 0.32, 0.10), trimMat2, +BOARD_W / 2 - 0.5, boardY - BOARD_H / 2 - 0.14, wallZ + 0.14));
-  // contact shadow on the stone: a soft dark quad slightly larger than the
-  // board, so the board reads as mounted ON the wall, not painted on it
+  arena.add(mesh(new THREE.BoxGeometry(BOARD_W + 0.14, 0.1, 0.26), trimMat2, 0, boardY + BOARD_H / 2 + 0.04, boardZ + 0.04));
+  arena.add(mesh(new THREE.BoxGeometry(BOARD_W + 0.14, 0.1, 0.26), trimMat2, 0, boardY - BOARD_H / 2 - 0.04, boardZ + 0.04));
+  arena.add(mesh(new THREE.BoxGeometry(0.1, BOARD_H + 0.14, 0.26), trimMat2, -(BOARD_W / 2 + 0.04), boardY, boardZ + 0.04));
+  arena.add(mesh(new THREE.BoxGeometry(0.1, BOARD_H + 0.14, 0.26), trimMat2, +(BOARD_W / 2 + 0.04), boardY, boardZ + 0.04));
+  // two cleats UNDER the board carry it on the wall: they span the whole
+  // shadow gap (0.02 buried in the stone, 0.03 into the board back)
+  arena.add(mesh(new THREE.BoxGeometry(0.09, 0.32, 0.29), trimMat2, -BOARD_W / 2 + 0.5, boardY - BOARD_H / 2 - 0.14, wallFaceZ + 0.125));
+  arena.add(mesh(new THREE.BoxGeometry(0.09, 0.32, 0.29), trimMat2, +BOARD_W / 2 - 0.5, boardY - BOARD_H / 2 - 0.14, wallFaceZ + 0.125));
+  // cast shadow, DIRECTIONAL (light from above): a soft dark band on the
+  // stone just BELOW the board, none above it - the physical signature of
+  // something mounted proud of a wall (a centered halo reads as recessed)
   const shadowCanvas = document.createElement('canvas');
-  shadowCanvas.width = shadowCanvas.height = 128;
+  shadowCanvas.width = 128; shadowCanvas.height = 64;
   {
     const g = shadowCanvas.getContext('2d');
-    const grd = g.createRadialGradient(64, 64, 8, 64, 64, 62);
-    grd.addColorStop(0, 'rgba(0,0,0,0.55)');
-    grd.addColorStop(0.7, 'rgba(0,0,0,0.28)');
+    const grd = g.createLinearGradient(0, 0, 0, 64);
+    grd.addColorStop(0, 'rgba(0,0,0,0.62)');
+    grd.addColorStop(0.45, 'rgba(0,0,0,0.30)');
     grd.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = grd;
-    g.fillRect(0, 0, 128, 128);
+    g.fillRect(0, 0, 128, 64);
   }
   const shadowTex = canvasTexture(shadowCanvas);
   const wallShadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(BOARD_W * 1.22, BOARD_H * 1.3),
-    new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: 0.85 })
+    new THREE.PlaneGeometry(BOARD_W * 1.06, 0.62),
+    new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: 0.75 })
   );
-  wallShadow.position.set(0.12, boardY - 0.06, wallZ + 0.012);
+  wallShadow.position.set(0.12, boardY - BOARD_H / 2 - 0.30, wallFaceZ + 0.012);
   wallShadow.renderOrder = -1;
   arena.add(wallShadow);
-  arena.userData.tapeBoard = { y: boardY, w: BOARD_W, h: BOARD_H, z: wallZ + 0.30 };
+  arena.userData.tapeBoard = { y: boardY, w: BOARD_W, h: BOARD_H, z: boardZ };
 
   // coping + engaged piers + merlons: this is what carries the wall now that
   // the arch hoops are gone, so it gets real stone texture too

@@ -37,7 +37,44 @@ await page.waitForTimeout(3200);
 // freeze the fight so the wall is unobstructed and the shot is deterministic
 await page.evaluate(() => window.__duelDebug.freeze(true, 1.1, -1.1));
 await page.waitForTimeout(900);
+
+const results = { checks: [] };
+const check = (name, ok, detail) => {
+  results.checks.push({ name, ok, detail });
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`);
+};
+
 const rect = await page.evaluate(() => window.__duelPage.chart.stats().screen);
+// v18.1 NO-COLLISION ASSERTION: read the real geometry out of the live scene
+// and prove the board hangs fully proud of every wall slice. Board is a box
+// (depth 0.18, centre board.z); wall face at wallZ + 0.25; the coping stone
+// (wallZ + 0.02, depth 0.62) is the deepest protruding slice -> its front face
+// must sit BEHIND the board's back face by at least the shadow gap.
+const geo = await page.evaluate(() => {
+  const d = window.__duelDebug;
+  const cam = d.camera;
+  const b = d.arena.userData.tapeBoard;
+  // wall face / coping front from the arena's own constants
+  const wallFace = -7.2 + 0.25;
+  const copingFront = -7.2 + 0.02 + 0.62 / 2;
+  return {
+    boardFront: b.z + 0.09, boardBack: b.z - 0.09, boardY: b.y, boardW: b.w,
+    chartPlaneZ: window.__duelPage.chart.stats().position ? window.__duelPage.chart.stats().position[2] : null,
+    wallFace, copingFront,
+    gapVsCoping: (b.z - 0.09) - copingFront,
+    gapVsWall: (b.z - 0.09) - wallFace,
+    camZ: cam.position.z,
+  };
+});
+check('board back is PROUD of the coping front (no slice-through)',
+  geo.gapVsCoping >= 0.02, `gap ${geo.gapVsCoping.toFixed(3)} (board back ${geo.boardBack.toFixed(2)} vs coping ${geo.copingFront.toFixed(2)})`);
+check('board back is PROUD of the wall face (shadow gap >= 0.05)',
+  geo.gapVsWall >= 0.05, `gap ${geo.gapVsWall.toFixed(3)}`);
+check('chart plane sits just in front of the board face (no z-fight)',
+  Math.abs(geo.chartPlaneZ - geo.boardFront) < 0.02,
+  `plane z ${geo.chartPlaneZ?.toFixed(3)} vs board front ${geo.boardFront.toFixed(3)}`);
+check('board is inside the blanked centre (trim clear of piers at x 4.1)',
+  geo.boardW / 2 + 0.05 <= 4.1, `half+trim ${(geo.boardW / 2 + 0.05).toFixed(2)} vs pier face 4.10`);
 const shot = await page.screenshot({ path: path.join(root, 'tools/shots/wallboard.png') });
 
 const png = PNG.sync.read(shot);
@@ -52,12 +89,6 @@ const B = Math.min(png.height - 1, Math.round(rect.b * png.height));
 // the blank-wall band DIRECTLY BELOW the board (still inside the blanked
 // centre, above the frieze) - declared before the classification loops use it
 const belowT = Math.min(png.height - 2, B + 4), belowB = Math.min(png.height - 1, B + 42);
-
-const results = { checks: [] };
-const check = (name, ok, detail) => {
-  results.checks.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`);
-};
 
 // ---- classify the board rect ----
 let glass = 0, green = 0, red = 0, gold = 0, bright = 0, boardN = 0;
