@@ -7,6 +7,7 @@ A single-page site: two Andalusian cats (DON GATO = BUY pressure, green; SULTAN 
 - Live URL: https://shojaee76-cmyk.github.io/rope-duel/
 - Source repo: https://github.com/shojaee76-cmyk/rope-duel (public, MIT not set)
 - Local durable copy: `C:\Users\capit\rope-duel` (this dir)
+- v18 status: wall-mounted tape board + pressure-role rule (attack/sit-guard) + identity swap (Sultan=BUY green, Don Gato=SELL red). New checkers: tools/rolecheck.mjs, tools/identitycheck.mjs, tools/wallboardcheck.mjs.
 
 ## Architecture
 - `feed.js` — BtcTradeFeed: Binance WS (trade + ticker), 30s rolling pressure [-1,+1], 250ms throttled emits, 3-endpoint reconnect w/ backoff, deterministic sim fallback. Zero deps.
