@@ -1152,9 +1152,16 @@ export class DuelCat {
     tg.tilt = sway;                                // a little live weight shift
     tg.headPitch = 0.12;                           // eyes on the foe, chin down
     tg.headYaw = -this.fw * 0.14;
-    tg.shS_z = 1.45 + guardUp;                     // sword arm UP: a high guard
-    tg.shS_x = 0.55;
-    tg.elS = -1.35 + guardUp;                      // closed: the point stays high
+    tg.shS_z = -0.25 + guardUp;                    // elbow DOWN, sword raised
+    tg.shS_x = 0.85;                               // arm out to his own side...
+    tg.elS = -2.55 + guardUp;                      // ...forearm folded up: the
+    /* v19b: the guard used to be shS_z 1.45 / elS -1.35, i.e. the upper arm
+     * swung FORWARD with the elbow folded, which put the blade (attached along
+     * the elbow's +x) pointing DOWN in front of the pair - measured at 0.18
+     * world units INSIDE the foe's torso on 108 of 533 frames. The blade now
+     * rises vertically BESIDE him (elbow down, elbow joint closed, arm carried
+     * out of the body plane by shS_x), which is both a readable high guard and
+     * clear of both bodies (asserted by tools/clipcheck.mjs). */
     tg.shO_z = -0.70;                              // off arm braced forward
     tg.shO_x = 0.60;
     tg.elO = -1.10;

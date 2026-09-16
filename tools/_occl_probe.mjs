@@ -1,0 +1,37 @@
+import { chromium } from 'playwright-core';
+import http from 'http';
+import { readFile, writeFile } from 'fs/promises';
+import path from 'path';
+import { PNG } from 'pngjs';
+const root = 'C:/Users/capit/rope-duel';
+const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.png':'image/png', '.woff2':'font/woff2' };
+const srv = http.createServer(async (req,res)=>{ let p=decodeURIComponent(req.url.split('?')[0]); if(p==='/')p='/index.html';
+  try{ const d=await readFile(path.join(root,p)); res.writeHead(200,{'Content-Type':MIME[path.extname(p)]||'application/octet-stream'}); res.end(d);}catch{ res.writeHead(404); res.end('no'); } });
+await new Promise(r=>srv.listen(8994,r));
+const b = await chromium.launch({ executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe', headless:true });
+const page = await b.newPage({ viewport:{width:1280,height:800} });
+await page.goto('http://localhost:8994/?mode=demo&seed=11',{waitUntil:'load'});
+await page.waitForTimeout(4000);
+await page.evaluate(()=>{ window.__duelDebug.freeze(true,1.1,-1.1); });
+await page.waitForTimeout(600);
+const rect = await page.evaluate(()=> window.__duelPage.chart.stats().screen);
+const A = await page.screenshot();
+const info = await page.evaluate(()=>{
+  const d = window.__duelDebug; const found=[];
+  d.arena.parent.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.type==='BoxGeometry' && o.scale.x>5){ found.push([o.scale.x,o.scale.y,o.scale.z,o.position.z]); o.visible=false; } });
+  return found;
+});
+await page.waitForTimeout(400);
+const B = await page.screenshot();
+await writeFile('tools/shots/ab_body_A.png', A);
+await writeFile('tools/shots/ab_body_B.png', B);
+const pa = PNG.sync.read(A), pb = PNG.sync.read(B);
+const L=Math.round(rect.l*pa.width), R=Math.round(rect.r*pa.width), T=Math.round(rect.t*pa.height), Bo=Math.round(rect.b*pa.height);
+let diff=0,tot=0;
+const stat=(p)=>{ let lum=[]; for(let y=T;y<Bo;y+=2) for(let x=L;x<R;x+=2){ const i=(p.width*y+x)<<2; lum.push(0.299*p.data[i]+0.587*p.data[i+1]+0.114*p.data[i+2]); } return lum; };
+const la=stat(pa), lb=stat(pb);
+for(let k=0;k<la.length;k++){ tot++; if(Math.abs(la[k]-lb[k])>24) diff++; }
+const mean=a=>a.reduce((s,c)=>s+c,0)/a.length;
+const hist=a=>{ const h=new Array(8).fill(0); for(const v of a) h[Math.min(7,Math.floor(v/32))]++; return h.map(v=>+(100*v/a.length).toFixed(1)); };
+console.log(JSON.stringify({ hiddenBody: info, rect, changedPct:+(100*diff/tot).toFixed(2), meanLum_A:+mean(la).toFixed(1), meanLum_B:+mean(lb).toFixed(1), histA:hist(la), histB:hist(lb), sampled:tot }, null, 1));
+await b.close(); srv.close(); process.exit(0);

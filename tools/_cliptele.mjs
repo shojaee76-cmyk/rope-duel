@@ -1,0 +1,17 @@
+import { chromium } from 'playwright-core';
+import http from 'http';
+import { readFile } from 'fs/promises';
+import path from 'path';
+const root='C:/Users/capit/rope-duel';
+const MIME={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.woff2':'font/woff2'};
+const srv=http.createServer(async(req,res)=>{let p=decodeURIComponent(req.url.split('?')[0]);if(p==='/')p='/index.html';
+ try{const d=await readFile(path.join(root,p));res.writeHead(200,{'Content-Type':MIME[path.extname(p)]||'application/octet-stream'});res.end(d);}catch{res.writeHead(404);res.end('no');}});
+await new Promise(r=>srv.listen(8988,r));
+const b=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+const page=await b.newPage({viewport:{width:1280,height:800}});
+const errs=[]; page.on('pageerror',e=>errs.push(e.message));
+await page.goto('http://localhost:8988/?mode=demo&seed=11',{waitUntil:'load'});
+await page.waitForTimeout(25000);
+const t=await page.evaluate(()=>({clip:window.__duelDebug.clipTelemetry, head:window.__duelDebug.contact, q:window.__duelDebug.quality()}));
+console.log(JSON.stringify({...t.errs?{}:{}, clip:t.clip, head: t.head?{checks:t.head.checks,fixes:t.head.fixes,worst:+t.head.worst.toFixed(3),worstOut:+t.head.worstOut.toFixed(3)}:null, quality:t.q, errs},null,1));
+await b.close(); srv.close(); process.exit(0);

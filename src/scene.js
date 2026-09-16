@@ -30,9 +30,14 @@ export function createDuelScene(container, opts = {}) {
    * display: measured on this laptop's iGPU the WebGL pass costs 7 ms at 1x and
    * 23 ms at 2x, so a 2x cap spends the whole frame budget before the scene has
    * drawn a single cat. 1.5 is visually equivalent on a dark scene and leaves
-   * room below; the quality governor below takes it further down when needed. */
-  const baseRatio = opts.res ? Math.max(0.4, Math.min(2, opts.res))
-    : Math.min(devicePixelRatio || 1, desktopQuality ? 1.5 : 1.25);
+   * room below; the quality governor below takes it further down when needed.
+   * v19b: 1.5 -> 1.75 on desktop, because on a 2x display a 1.5x canvas is
+   * STRETCHED by the browser and the whole scene reads slightly soft even when
+   * nothing is wrong (the complaint was "it got a little blur when running it").
+   * The governor still protects a weak GPU, it just does it from a sharper
+   * starting point and no longer overshoots (see RATIO_STEPS). */
+  const baseRatio = opts.res ? Math.max(0.4, Math.min(2.5, opts.res))
+    : Math.min(devicePixelRatio || 1, desktopQuality ? 1.75 : 1.25);
   renderer.setPixelRatio(baseRatio);
   renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
   renderer.shadowMap.enabled = false;   // v4: cost 40% of the frame budget
@@ -135,6 +140,20 @@ export function createDuelScene(container, opts = {}) {
   // (bladeMidWorld / lerp / head tips), which is pure GC churn in a brawl
   const _hA = new THREE.Vector3(), _hB = new THREE.Vector3();
   const _mid = new THREE.Vector3(), _tip = new THREE.Vector3(), _tmpV = new THREE.Vector3();
+  // v19b blade-contact scratch (see the constraint in the loop)
+  const _pelA = new THREE.Vector3(), _cheA = new THREE.Vector3();
+  const _pelB = new THREE.Vector3(), _cheB = new THREE.Vector3();
+  const _bp = new THREE.Vector3();
+  // point-to-segment distance: the torso proxy is a capsule, not a sphere
+  function segDist(p, a, c) {
+    const abx = c.x - a.x, aby = c.y - a.y, abz = c.z - a.z;
+    const apx = p.x - a.x, apy = p.y - a.y, apz = p.z - a.z;
+    const ab2 = abx * abx + aby * aby + abz * abz;
+    let t = ab2 > 1e-9 ? (apx * abx + apy * aby + apz * abz) / ab2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = a.x + abx * t, qy = a.y + aby * t, qz = a.z + abz * t;
+    return Math.sqrt((p.x - qx) * (p.x - qx) + (p.y - qy) * (p.y - qy) + (p.z - qz) * (p.z - qz));
+  }
 
   // ---- v14 blade trails ------------------------------------------------------
   // A cut reads as technique when the blade draws a visible arc: a short ribbon
@@ -229,6 +248,9 @@ export function createDuelScene(container, opts = {}) {
   // how close the muzzle tips got BEFORE (worst) and AFTER (worstOut) the fix, so
   // the constraint's own output is verifiable, not just inferred from the render
   const contact = opts.debug ? { checks: 0, fixes: 0, worst: 9, worstOut: 9, post: null } : null;
+  // v19b blade-contact: switch + telemetry (same shape as the head constraint's)
+  const clipOff = /[?&]clip=off/.test(typeof location !== 'undefined' ? location.search : '');
+  const clipTelemetry = opts.debug ? { checks: 0, fixes: 0, worstIn: 0, worstOut: 0, last: {} } : null;
   function bladeCross(a, b, out) {
     a.bladeMidWorld(out);
     b.bladeMidWorld(_tmpV);
@@ -408,16 +430,39 @@ export function createDuelScene(container, opts = {}) {
    * never oscillate. The scene keeps its geometry, textures, particles and
    * animation - only the sampling density changes, and only as far as it must.
    * ?res=0.75 pins the ratio, ?gov=off disables the governor entirely. */
-  const RATIO_STEPS = [1, 0.85, 0.72, 0.6, 0.5];
+  /* v19b: the governor is much more reluctant, because a step down is VISIBLE
+   * as blur and the user reported exactly that. Three changes:
+   *  - a WARM-UP grace period: the first ~150 frames include shader compiles and
+   *    the texture uploads, so their frame times say nothing about the steady
+   *    state, yet they were enough to trigger a step down at boot.
+   *  - a deeper trigger (>26 ms = below ~38 fps, was >20 ms = below 50 fps) and
+   *    TWO consecutive slow windows before it acts.
+   *  - a floor of 0.75 of the base (was 0.5): the worst case loses a quarter of
+   *    the pixels instead of half, so the scene can never go properly soft.
+   * It still reverts a step that bought nothing, so a machine whose cost is GPU
+   * contention rather than fill is not pushed down a staircase for no gain. */
+  const RATIO_STEPS = [1, 0.9, 0.82, 0.75];
   const gov = {
     on: opts.governor !== false,
     base: baseRatio, step: 0, ratio: baseRatio, changes: 0, fails: 0,
-    window: 16, slowMs: 20, fastMs: 13.5,   // >20 ms = below 50 fps, <13.5 ms = above 74 fps
+    window: 16, slowMs: 26, fastMs: 14,   // >26 ms = below 38 fps, <14 ms = above 71 fps
     buf: [], cooldown: 0, hold: 0, med: 0,
-    pending: 0, preMed: 0, lock: 0            // lock counts consecutive failed attempts
+    pending: 0, preMed: 0, lock: 0,       // lock counts consecutive failed attempts
+    warmup: 150                          // frames ignored at boot (compile + uploads)
   };
+  /* v19b HARD SHARPNESS FLOOR: the governor may remove the extra supersampling,
+   * but it may NEVER take the canvas below 1 render pixel per CSS pixel on a
+   * desktop. That is the contract the "it got a little blur when running it"
+   * report needs: the worst case loses some antialiasing crispness, never
+   * actual resolution. STEP_CAP is the last index whose ratio still respects it
+   * (at base 1.0 that is index 0, i.e. the governor cannot step at all). */
+  const MIN_RATIO = desktopQuality ? 1.0 : 0.75;
+  const STEP_CAP = (() => {
+    for (let i = 1; i < RATIO_STEPS.length; i++) if (baseRatio * RATIO_STEPS[i] < MIN_RATIO) return i - 1;
+    return RATIO_STEPS.length - 1;
+  })();
   function applyStep(i) {
-    gov.step = Math.max(0, Math.min(RATIO_STEPS.length - 1, i));
+    gov.step = Math.max(0, Math.min(STEP_CAP, i));
     gov.ratio = gov.base * RATIO_STEPS[gov.step];
     renderer.setPixelRatio(gov.ratio);
     resize();
@@ -425,6 +470,9 @@ export function createDuelScene(container, opts = {}) {
   }
   function govern(frameMs) {
     if (!gov.on) return;
+    // v19b: ignore the boot frames (shader compile + every texture upload lands
+    // in the first second and used to be enough to step the resolution down)
+    if (gov.warmup > 0) { gov.warmup--; return; }
     gov.buf.push(frameMs);
     if (gov.buf.length < gov.window) return;
     const s = gov.buf.slice().sort((a, b) => a - b);
@@ -454,8 +502,10 @@ export function createDuelScene(container, opts = {}) {
       return;
     }
     if (gov.cooldown > 0) { gov.cooldown--; return; }
-    if (gov.med > gov.slowMs && gov.step < RATIO_STEPS.length - 1) {
-      gov.preMed = gov.med; gov.pending = 3; gov.hold = 0;
+    // two CONSECUTIVE slow windows before acting: one hitch is not a slow scene
+    if (gov.med > gov.slowMs) gov.slow = (gov.slow || 0) + 1; else gov.slow = 0;
+    if (gov.med > gov.slowMs && gov.slow >= 2 && gov.step < STEP_CAP) {
+      gov.preMed = gov.med; gov.pending = 3; gov.hold = 0; gov.slow = 0;
       applyStep(gov.step + 1); gov.changes++;
     } else if (gov.med < gov.fastMs && gov.step > 0) {
       // only climb back after several consecutive comfortable windows
@@ -573,6 +623,86 @@ export function createDuelScene(container, opts = {}) {
       }
     }
     rope.updateVisual();
+
+    /* ---- v19b BLADE CONTACT (user: "the swords, the cats and the clouthes are
+     * colliding to each other anytime") ----
+     * Measured baseline with tools/clipcheck.mjs: the blade crossed the FOE's
+     * torso on 30.6% of samples, worst 0.18 world units deep (the torso proxy is
+     * a 0.26-radius capsule, the head a 0.28 sphere). Same pattern as the head
+     * constraint above: measure the REAL rendered blade points and correct the
+     * pose until they clear, iterating with forced matrix updates. The correction
+     * is monotonically verified - a step that does not reduce the penetration is
+     * rolled back, so this can never make a pose worse. Two cases:
+     *   - into the foe   -> fold the sword arm back (the thrust stops at the body)
+     *   - into himself   -> fold the elbow tighter AND carry the arm out of the
+     *                       body plane (shS_x), which is what clears a raised
+     *                       blade from his own head and chest
+     * ?clip=off disables it (A/B evidence runs keep the switch). */
+    if (!freezeCtl.armed && !clipOff) {
+      const BODY_R = 0.26, HEAD_R = 0.28, BLADE_U = [0.6, 0.8, 1.0, 1.2];
+      catA.data.hips.getWorldPosition(_pelA); catA.data.spine.getWorldPosition(_cheA);
+      catB.data.hips.getWorldPosition(_pelB); catB.data.spine.getWorldPosition(_cheB);
+      const P = { A: _pelA, B: _pelB }, C = { A: _cheA, B: _cheB };
+      for (const cat of [catA, catB]) {
+        const side = cat.data.side, foeSide = side === 'A' ? 'B' : 'A';
+        const foeHead = foeSide === 'A' ? _hA : _hB;
+        const ownHead = side === 'A' ? _hA : _hB;
+        const arm = cat.data.arms[cat.data.swordArm];
+        const measure = () => {
+          let pen = 0, kind = 0;
+          for (let k = 0; k < BLADE_U.length; k++) {
+            _bp.set(BLADE_U[k], 0, 0);
+            cat.data.sword.localToWorld(_bp);
+            const pF = Math.max(BODY_R - segDist(_bp, P[foeSide], C[foeSide]), HEAD_R - _bp.distanceTo(foeHead), 0);
+            const pS = Math.max(BODY_R - segDist(_bp, P[side], C[side]), HEAD_R - _bp.distanceTo(ownHead), 0);
+            if (pF > pen) { pen = pF; kind = 1; }
+            if (pS > pen) { pen = pS; kind = 2; }
+          }
+          return { pen, kind };
+        };
+        let folded = 0;
+        const pen0 = measure().pen;
+        let before = { pen: pen0, kind: 0 };
+        for (let it = 0; it < 3; it++) {
+          if (it === 0) { const m = measure(); before = m; }
+          else before = measure();
+          if (before.pen <= 0.012) break;
+          if (folded > 0.8) break;
+          const step = Math.min(0.13, before.pen * 1.3);
+          const sz = arm.shoulder.rotation.z, sx = arm.shoulder.rotation.x, ez = arm.elbow.rotation.z;
+          /* Candidate corrections, tried in order and kept only if the measured
+           * penetration actually drops (the loop can never make a pose worse):
+           *  - into the foe: fold the arm back, trying both out-of-plane swings,
+           *    because a blade pointing straight at the foe has to leave the
+           *    body LINE, not just shorten
+           *  - into himself: carry the arm out of the body plane first */
+          const cands = before.kind === 1
+            ? [[-step, step * 0.5, -step * 0.4], [-step, -step * 0.5, -step * 0.4], [-step, 0, -step * 0.7]]
+            : [[-step * 0.4, step * 0.7, -step * 0.6], [-step * 0.4, -step * 0.7, -step * 0.6]];
+          let ok = false;
+          for (const [dz, dx, de] of cands) {
+            arm.shoulder.rotation.z = sz + dz;
+            arm.shoulder.rotation.x = sx + dx;
+            arm.elbow.rotation.z = ez + de;
+            cat.root.updateMatrixWorld(true);
+            if (measure().pen < before.pen - 0.002) { ok = true; folded += Math.abs(dz) + Math.abs(dx); break; }
+          }
+          if (!ok) {   // no candidate helped: restore and stop
+            arm.shoulder.rotation.z = sz; arm.shoulder.rotation.x = sx; arm.elbow.rotation.z = ez;
+            cat.root.updateMatrixWorld(true);
+            break;
+          }
+        }
+        if (clipTelemetry) {
+          const after = measure();
+          clipTelemetry.checks++;
+          if (folded > 0) clipTelemetry.fixes++;
+          if (pen0 > clipTelemetry.worstIn) clipTelemetry.worstIn = pen0;
+          if (after.pen > clipTelemetry.worstOut) clipTelemetry.worstOut = after.pen;
+          clipTelemetry.last[side] = { before: +pen0.toFixed(4), after: +after.pen.toFixed(4), folded: +folded.toFixed(3) };
+        }
+      }
+    }
 
     // v14: while a swing is LIVE the trail emits every frame from the tip, so
     // the arc follows the real blade path instead of a single spark at impact.
@@ -700,7 +830,7 @@ export function createDuelScene(container, opts = {}) {
   // debug/integration handle (used by tests and the root webpage task)
   if (opts.debug) {
     window.__duelDebug = {
-      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, gov, contact, skyChart,
+      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, gov, contact, clipTelemetry, skyChart,
       quality: () => ({ ratio: gov.ratio, base: gov.base, step: gov.step, med: gov.med, changes: gov.changes, on: gov.on, fails: gov.fails, lock: gov.lock }),
       heat: () => heat,
       // v19: the price lane as the HUD scale reads it

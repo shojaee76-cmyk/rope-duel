@@ -108,7 +108,14 @@ export function createSkyChart(scene, camera, opts = {}) {
     put(rails[1], w + RAIL * 2, RAIL, FRAME_D, cx, cy - h / 2 - RAIL / 2, railZ);
     put(rails[2], RAIL, h, FRAME_D, cx - w / 2 - RAIL / 2, cy, railZ);
     put(rails[3], RAIL, h, FRAME_D, cx + w / 2 + RAIL / 2, cy, railZ);
-    put(body, w + 0.01, h + 0.01, FRAME_D * 0.55, cx, cy, z - FRAME_D * 0.22);
+    /* v19b REGRESSION FIX: the screen body must sit BEHIND the glass.
+     * It was centred at z - FRAME_D*0.22, i.e. its front face landed at
+     * z + 0.0055 - 0.0055 IN FRONT of the glass. The body is opaque and
+     * depth-writes; the glass is transparent and only depth-TESTS, so the body
+     * won the depth test and the whole chart was never drawn (measured: hiding
+     * this one mesh changed 72% of the board rect's pixels). The centre is now
+     * FRAME_D*0.85 back, so the body's front face clears the glass by 0.0575. */
+    put(body, w + 0.01, h + 0.01, FRAME_D * 0.55, cx, cy, z - FRAME_D * 0.85);
   }
   scene.add(group);
 
@@ -531,6 +538,15 @@ export function createSkyChart(scene, camera, opts = {}) {
     return true;
   }
 
+  /* v19b: A/B hook for the render-level check. Occlusion is invisible to every
+   * canvas-side metric (stats().ink reads the CANVAS, not the frame), so the only
+   * honest test that the chart is ON SCREEN is to toggle it and diff the rendered
+   * pixels inside its projected rect. tools/wallboardcheck.mjs does exactly that. */
+  function setVisible(on) {
+    mesh.visible = !!on;
+    return mesh.visible;
+  }
+
   function stats() {
     const chip = chipState();
     const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -591,5 +607,5 @@ export function createSkyChart(scene, camera, opts = {}) {
   // the panel uses the page's display font: repaint once it has loaded
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => draw()).catch(() => {});
 
-  return { update, notifyStatus, trade, stats, setVariant, relayout: onResize, dispose, mesh, group, get variant() { return variant; } };
+  return { update, notifyStatus, trade, stats, setVariant, setVisible, relayout: onResize, dispose, mesh, group, bezel, body, get variant() { return variant; } };
 }
