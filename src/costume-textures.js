@@ -117,10 +117,15 @@ export function knightClothTexture(part = 'cape') {
 }
 
 export function eyeTexture(color) {
-  const { c, g } = surface(128, 128, '#211B19');
-  const iris = g.createRadialGradient(64,65,6,64,64,64);
-  iris.addColorStop(0, '#F9E5A4'); iris.addColorStop(0.40, color);
-  iris.addColorStop(0.83, color); iris.addColorStop(1, '#19231C');
+  // v18.2: the iris gradient now fills the WHOLE canvas. The almond geometry
+  // maps its full UV square into the fan, so the old dark-background version
+  // put dark corners at the almond tips and the eye read as a black blob with
+  // a pin-prick of colour (user: "you fucked up the eyes"). Now every visible
+  // texel is iris: colour field, dark rim at the almond edge, slit, lights.
+  const { c, g } = surface(128, 128, color);
+  const iris = g.createRadialGradient(64,64,4,64,64,96);
+  iris.addColorStop(0, '#F9E5A4'); iris.addColorStop(0.30, color);
+  iris.addColorStop(0.74, color); iris.addColorStop(1, '#241A12');
   g.fillStyle = iris; g.fillRect(0,0,128,128);
   // Tapered slit, not a box; reflected light is painted in the same draw call.
   g.fillStyle = '#090C10'; g.beginPath(); g.moveTo(64,10);

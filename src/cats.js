@@ -376,33 +376,12 @@ function buildScimitar() {
   return g;
 }
 
-// waving cape (A): pivot at the top, vertices swayed in update()
-function buildCape() {
-  const clothPair = tex('embroidered-cape', () => knightClothTexture('cape'));
-  const matOut = std('#FFFFFF', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.009 }, clothPair);
-  const geo = new THREE.PlaneGeometry(0.52, 0.78, 10, 12);
-  geo.translate(0, -0.39, 0);
-  // baked folds: a flat sheet always reads as plastic, no matter the texture.
-  // Displace the surface with layered folds that deepen toward the hem.
-  {
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i);
-      const depth = Math.max(0, Math.min(1, -y / 0.78));
-      const fold = Math.sin(x * 15.0) * 0.016
-        + Math.sin(x * 26.0 + y * 8.0) * 0.009
-        + Math.sin(y * 17.0 + x * 4.0) * 0.012
-        + Math.sin(x * 6.0) * 0.02;
-      pos.setZ(i, fold * depth * 1.7);
-    }
-    geo.computeVertexNormals();
-  }
-  const cape = new THREE.Mesh(geo, matOut);
-  cape.castShadow = true;
-  // Embroidered border follows the animated cloth UVs, no rigid floating bar.
-  cape.name = 'embroidered-red-cape';
-  return cape;
-}
+// waving cape (A): REMOVED in v18.2. The flat sheet's top edge was buried in
+// the ruff cone and the tail (held up and wrapped behind in v19) whipped
+// straight through it every fight cycle; keeping it clip-free without cloth
+// collision was not attainable, and the user sanctioned deletion ("If you
+// cant fix it, delete it"). The knight keeps his Spanish read via the morion,
+// golilla ruff, red slashed doublet + tabard, tassets and rapier.
 
 // ---------- CAT B: DON GATO (SELL side, LEFT pole; faces world +x) ----------
 // CONVENTION (task t_167a53f3): SELL = RED. v18 IDENTITY (user directive): the
@@ -572,11 +551,8 @@ export function buildDonGato() {
   rig.spine.add(baldric);
   rig.spine.add(mesh(sphere(0.027, 10, 8), MA.goldBright, 0.19, 0.43, 0.01));
 
-  // cape on the back (local -x), hangs to hock level, held by a gold collar
-  const cape = buildCape();
-  cape.position.set(-0.14, 0.5, 0);
-  cape.rotation.y = 0.22;
-  rig.spine.add(cape);
+  // v18.2: cape deleted (clipped the body; user sanctioned removal). The gold
+  // collar stays as the back-strap of the armour.
   const collar = mesh(torus(0.155, 0.018), MA.gold, 0.02, 0.52, 0);
   collar.rotation.x = Math.PI / 2;
   collar.rotation.z = 0.1;
@@ -618,7 +594,7 @@ export function buildDonGato() {
 
   return {
     ...rig, name: 'DON GATO', side: 'B', facing: 0,
-    sword: rapier, swordArm: 'R', cape, crossMat: MA.cross, plume
+    sword: rapier, swordArm: 'R', crossMat: MA.cross, plume
   };
 }
 
@@ -1307,16 +1283,17 @@ export class DuelCat {
     tg.tilt = sway;                                // a little live weight shift
     tg.headPitch = 0.12;                           // eyes on the foe, chin down
     tg.headYaw = -this.fw * 0.14;
-    tg.shS_z = -0.25 + guardUp;                    // elbow DOWN, sword raised
-    tg.shS_x = 0.85;                               // arm out to his own side...
-    tg.elS = -2.55 + guardUp;                      // ...forearm folded up: the
-    /* v19b: the guard used to be shS_z 1.45 / elS -1.35, i.e. the upper arm
-     * swung FORWARD with the elbow folded, which put the blade (attached along
-     * the elbow's +x) pointing DOWN in front of the pair - measured at 0.18
-     * world units INSIDE the foe's torso on 108 of 533 frames. The blade now
-     * rises vertically BESIDE him (elbow down, elbow joint closed, arm carried
-     * out of the body plane by shS_x), which is both a readable high guard and
-     * clear of both bodies (asserted by tools/clipcheck.mjs). */
+    /* v18.2: the blade points FORWARD at the foe (user: "he is gonna put his
+     * sword in front of him. Not behind. Thats not make sense"). The v19b
+     * pose (shS_z -0.25, elS -2.55: elbow down + forearm folded tight) aimed
+     * the blade BACKWARD (-0.94 in spine space). Measured fix: arm forward
+     * (shS_z +0.7), elbow open to -1.45 -> the forearm+blade ride up-forward
+     * at ~50 deg, paw at chest height, TIP in the air corridor between the
+     * cats beside the foe's head (tip x within +-0.35, y ~3.5, i.e. outside
+     * the foe's body capsule AND head sphere - a hanging point guard). */
+    tg.shS_z = 0.70 + guardUp * 0.3;               // arm swung FORWARD
+    tg.shS_x = 0.35;                               // blade plane out of the body
+    tg.elS = -1.45 + guardUp;                      // forearm up-forward ~50 deg
     tg.shO_z = -0.70;                              // off arm braced forward
     tg.shO_x = 0.60;
     tg.elO = -1.10;
