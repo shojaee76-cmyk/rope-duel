@@ -156,10 +156,12 @@ const FIGHT_LABELS = {
   IDLE: 'EN GARDE', RECOVER: 'RECOVERING', LUNGE: 'LUNGE!', RUSH: 'RUSH!',
   SLASH_UP: 'SLASH UP!', SLASH_SPIN: 'SLASH SPIN!', HIT: 'HIT!',
   STUMBLE: 'STAGGERS!', BLADE_LOCK: 'BLADE LOCK', CLASH: 'CLASH!',
-  FREEZE: 'EN GARDE', TAUNT: 'TAUNTS!', RIPOSTE: 'RIPOSTE!', PARRY_HOP: 'PARRY!'
+  FREEZE: 'EN GARDE', TAUNT: 'TAUNTS!', RIPOSTE: 'RIPOSTE!', PARRY_HOP: 'PARRY!',
+  /* v14 technique labels: the new moves read as technique, not as noise */
+  THRUST: 'THRUST!', FEINT: 'FEINT!', PARRY_BEAT: 'BEAT!'
 };
 function actFor(name) {
-  if (name === 'LUNGE' || name === 'RUSH' || name === 'RIPOSTE') return 'lunge';
+  if (name === 'LUNGE' || name === 'RUSH' || name === 'RIPOSTE' || name === 'THRUST') return 'lunge';
   if (name === 'BLADE_LOCK') return 'lock';
   if (name === 'CLASH') return 'clash';
   if (name === 'HIT' || name === 'STUMBLE') return 'hit';

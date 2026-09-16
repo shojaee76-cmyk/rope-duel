@@ -133,6 +133,65 @@ export function createDuelScene(container, opts = {}) {
   // (bladeMidWorld / lerp / head tips), which is pure GC churn in a brawl
   const _hA = new THREE.Vector3(), _hB = new THREE.Vector3();
   const _mid = new THREE.Vector3(), _tip = new THREE.Vector3(), _tmpV = new THREE.Vector3();
+
+  // ---- v14 blade trails ------------------------------------------------------
+  // A cut reads as technique when the blade draws a visible arc: a short ribbon
+  // that follows the sword tip for ~0.22 s and fades. One pooled geometry per
+  // cat, N points ring buffer, additive; zero allocation per frame.
+  const TRAIL_N = 22;
+  function makeTrail(cat) {
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(TRAIL_N * 3);
+    const col = new Float32Array(TRAIL_N * 3);
+    const age = new Float32Array(TRAIL_N).fill(Infinity);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.PointsMaterial({
+      size: 0.085, vertexColors: true, map: (() => {
+        const c = document.createElement('canvas'); c.width = c.height = 64;
+        const g = c.getContext('2d');
+        const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grd.addColorStop(0, 'rgba(255,255,255,1)');
+        grd.addColorStop(0.5, 'rgba(255,255,255,0.4)');
+        grd.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+        return new THREE.CanvasTexture(c);
+      })(),
+      transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    const points = new THREE.Points(geo, mat);
+    points.frustumCulled = false;
+    scene.add(points);
+    const tint = new THREE.Color(cat.data.side === 'A' ? SIDE.BUY_BRIGHT : SIDE.SELL_BRIGHT);
+    return {
+      points, pos, col, age, tint,
+      emit(p) {
+        // find the oldest slot
+        let k = 0;
+        for (let i = 1; i < TRAIL_N; i++) if (this.age[i] > this.age[k]) k = i;
+        this.age[k] = 0;
+        this.pos[k * 3] = p.x; this.pos[k * 3 + 1] = p.y; this.pos[k * 3 + 2] = p.z;
+      },
+      update(dt) {
+        const life = 0.22;
+        for (let i = 0; i < TRAIL_N; i++) {
+          if (this.age[i] > life) { this.col[i * 3] = this.col[i * 3 + 1] = this.col[i * 3 + 2] = 0; continue; }
+          this.age[i] += dt;
+          const f = 1 - this.age[i] / life;      // 1 fresh -> 0 dead
+          this.col[i * 3] = this.tint.r * f;
+          this.col[i * 3 + 1] = this.tint.g * f;
+          this.col[i * 3 + 2] = this.tint.b * f;
+        }
+        this.points.geometry.attributes.position.needsUpdate = true;
+        this.points.geometry.attributes.color.needsUpdate = true;
+      }
+    };
+  }
+  const trailA = makeTrail(catA), trailB = makeTrail(catB);
+  const trail = {
+    start(cat) { (cat.data.side === 'A' ? trailA : trailB).emit(cat.bladeTipWorld(_tip)); },
+    update(dt) { trailA.update(dt); trailB.update(dt); }
+  };
   // contact telemetry (debug only): how often the head constraint had to fire and
   // how close the muzzle tips got BEFORE (worst) and AFTER (worstOut) the fix, so
   // the constraint's own output is verifiable, not just inferred from the render
@@ -178,6 +237,20 @@ export function createDuelScene(container, opts = {}) {
       vfx.dustBurst({ x: cat.x, y: rope.yAt(cat.x), z: 0 });
     },
     onLungeHit(cat) { landAttack(cat, false); },
+    onThrust(cat) {
+      // v14: the point attack. A tight, fast spark flick at the tip plus a
+      // short trail - a thrust should look precise, not explosive.
+      const tip = cat.bladeTipWorld();
+      vfx.lungeSparks(tip);
+      trail.start(cat);
+    },
+    onBeat(cat) {
+      // v14: the parry beat - one bright metallic ping at the blade, tiny.
+      const tip = cat.bladeTipWorld();
+      vfx.clashBurst(tip);
+      kick(0.05, 0.03);
+      trail.start(cat);
+    },
     onSlash(cat, kind) {
       const tip = cat.bladeTipWorld();
       if (sideOf(cat) === 'A') {
@@ -187,6 +260,7 @@ export function createDuelScene(container, opts = {}) {
         vfx.ghost(tip);
         vfx.ghostTile(tip);
       }
+      trail.start(cat);   // v14: every cut draws its arc
       if (kind === 'crescent' || kind === 'down') landAttack(cat, true);
       rope.injectImpulse(cat.x, 0, -0.7, 0);
     },
@@ -465,6 +539,18 @@ export function createDuelScene(container, opts = {}) {
     }
     rope.updateVisual();
 
+    // v14: while a swing is LIVE the trail emits every frame from the tip, so
+    // the arc follows the real blade path instead of a single spark at impact.
+    if (!freezeCtl.armed) {
+      for (const cat of [catA, catB]) {
+        const n = cat.state.name;
+        if (n === 'LUNGE' || n === 'RUSH' || n === 'SLASH_UP' || n === 'SLASH_SPIN' || n === 'RIPOSTE' || n === 'THRUST') {
+          const st = cat.state, dur = st.dur || 1;
+          if (st.t > dur * 0.2 && st.t < dur * 0.75) (cat.data.side === 'A' ? trailA : trailB).emit(cat.bladeTipWorld(_tip));
+        }
+      }
+    }
+
     flag.update(dt, rope);
 
     // fight heat now follows the director's SMOOTHED brawl intensity instead of the
@@ -502,6 +588,7 @@ export function createDuelScene(container, opts = {}) {
     updateArena(arena, simTime);
 
     vfx.update(dt);
+    trail.update(dt);   // v14: fade the blade arcs
     crowd.update(dt, director.pressure, heat);
 
     // ---- v2 ambience update ----

@@ -26,20 +26,54 @@ const clamp = THREE.MathUtils.clamp;
 const V3 = THREE.Vector3;
 
 // move table: len = seconds, cool = per-move cooldown, reach = how far the cat
-// travels (scaled down to the live gap so nobody steps through anyone)
+// travels (scaled down to the live gap so nobody steps through anyone).
+// v14 adds real technique: THRUST (the point leads), FEINT (bait the parry),
+// PARRY_BEAT (the timing counter), and faster cooldowns on the short moves so
+// the combinations stay legal.
 const MOVES = {
   RUSH:       { cat: 'A', len: 0.62, cool: 2.6, prio: 1 }, // Charge of the Golden Bull
   LUNGE:      { cat: 'A', len: 0.5,  cool: 2.2, prio: 1 },
+  THRUST:     { cat: 'A', len: 0.42, cool: 1.6, prio: 1 }, // v14: the stop-thrust
+  FEINT:      { cat: 'A', len: 0.5,  cool: 2.8, prio: 2 }, // v14: the bait
   SLASH_UP:   { cat: 'A', len: 0.55, cool: 2.8, prio: 1 }, // Matador Moonrise
   TAUNT:      { cat: 'A', len: 0.8,  cool: 4.5, prio: 2 }, // Cross of the Conquistador
   PARRY_HOP:  { cat: 'B', len: 0.45, cool: 1.9, prio: 1 }, // Zellij Sidestep
+  PARRY_BEAT: { cat: 'B', len: 0.4,  cool: 1.5, prio: 1 }, // v14: the beat
   SLASH_SPIN: { cat: 'B', len: 0.6,  cool: 2.4, prio: 1 }, // Moorish Windmill
   RIPOSTE:    { cat: 'B', len: 0.6,  cool: 2.2, prio: 2 }  // Crescent Riposte
 };
-const OFFENSIVE = new Set(['RUSH', 'LUNGE', 'SLASH_UP', 'SLASH_SPIN', 'RIPOSTE', 'TAUNT']);
-const DEFENSIVE = new Set(['PARRY_HOP', 'RIPOSTE', 'RECOVER']);
-const A_POOL = ['RUSH', 'SLASH_UP', 'LUNGE', 'LUNGE'];
-const B_POOL = ['SLASH_SPIN', 'PARRY_HOP', 'RIPOSTE', 'RIPOSTE'];
+const OFFENSIVE = new Set(['RUSH', 'LUNGE', 'THRUST', 'SLASH_UP', 'SLASH_SPIN', 'RIPOSTE', 'TAUNT']);
+const DEFENSIVE = new Set(['PARRY_HOP', 'PARRY_BEAT', 'RIPOSTE', 'RECOVER']);
+const A_POOL = ['LUNGE', 'THRUST', 'THRUST', 'SLASH_UP', 'FEINT'];
+const B_POOL = ['SLASH_SPIN', 'PARRY_BEAT', 'RIPOSTE', 'PARRY_HOP'];
+
+// v14 technique grammar: the reply MATCHES the technique instead of a coin
+// flip. Measured in real fencing and in the fight logs both: a wide charge is
+// answered with distance (sidestep), a point attack with a beat, a showy
+// attack with a parry. The old code answered everything with one of two moves
+// at random, which is why long exchanges never built a phrase.
+const REACTION = {
+  RUSH:       { B: 'PARRY_HOP',  A: 'LUNGE' },     // charge  -> give ground / slide in under it
+  LUNGE:      { B: 'PARRY_HOP',  A: 'LUNGE' },     // lunge   -> hop away / counter-lunge
+  THRUST:     { B: 'PARRY_BEAT', A: 'LUNGE' },     // point   -> beat it aside
+  SLASH_UP:   { B: 'PARRY_BEAT', A: 'LUNGE' },     // big cut -> beat / stop-hit
+  FEINT:      { B: 'PARRY_BEAT', A: 'LUNGE' },     // the bait is beaten -> riposte threat
+  SLASH_SPIN: { A: 'LUNGE',      B: 'PARRY_HOP' }, // windmill -> stop-hit through it
+  RIPOSTE:    { A: 'LUNGE',      B: 'PARRY_HOP' },
+  TAUNT:      { A: 'LUNGE',      B: 'PARRY_HOP' }
+};
+
+// v14 combos: a move can CHAIN into its follow-up the moment its window opens.
+// The follow-up skips the side breather (one action), lands inside the same
+// phrase, and never loops (chainDepth). This is what turns isolated swings
+// into phrases: lunge -> thrust -> cut, or beat -> riposte.
+const COMBO = {
+  LUNGE:      { next: 'THRUST',   win: 0.30 },   // blade lands -> the point finishes it
+  THRUST:     { next: 'SLASH_UP', win: 0.26 },   // reprise -> the big cut
+  FEINT:      { next: 'THRUST',   win: 0.22 },   // the bait pays off
+  PARRY_BEAT: { next: 'RIPOSTE',  win: 0.34 },   // the beat earns the riposte
+  PARRY_HOP:  { next: 'RIPOSTE',  win: 0.24 }    // the hop opens the counter
+};
 
 export class FightDirector {
   constructor({ rope, cats, flag, vfx, arena }) {
@@ -101,7 +135,14 @@ export class FightDirector {
     this.intensity = 0;            // 0..1 smoothed brawl intensity (camera + crowd)
     this.log = [];                 // recent starts: { t, side, move, reason }
     this.reasons = {};             // reason -> count (which source drives the fight)
+    // ---- v14 technique -------------------------------------------------------
+    // smooth() = 3t^2-2t^3. The pair's gap used to close at constant speed and
+    // stop dead when it arrived; an exponential approach with a rate cap stops
+    // softly instead. The hunt (lateral weave) used to switch off with the
+    // phase, which was a visible sideways snap every engage.
+    this.hunt = 0;                 // low-passed lateral weave offset
   }
+  _foe(side) { return side === 'A' ? 'B' : 'A'; }
 
   // ---------- public API (called by the data module) ----------
   // smoothed brawl intensity (0..1) that the scene's camera and crowd follow
@@ -156,8 +197,9 @@ export class FightDirector {
 
     // one continuous brawl intensity for the camera and the crowd, replacing the
     // binary "is either cat locked" flag the scene used to chase
-    const W = { BLADE_LOCK: 1, CLASH: 0.85, HIT: 0.7, LUNGE: 0.62, RUSH: 0.62, RIPOSTE: 0.55,
-      STUMBLE: 0.5, TAUNT: 0.32, RECOVER: 0.24, PARRY_HOP: 0.18, IDLE: 0.08, FREEZE: 0.05 };
+    const W = { BLADE_LOCK: 1, CLASH: 0.85, HIT: 0.7, LUNGE: 0.62, RUSH: 0.62, THRUST: 0.55,
+      RIPOSTE: 0.55, STUMBLE: 0.5, FEINT: 0.3, PARRY_BEAT: 0.35, TAUNT: 0.32,
+      RECOVER: 0.24, PARRY_HOP: 0.18, IDLE: 0.08, FREEZE: 0.05 };
     const want = Math.max(W[A.state.name] === undefined ? 0.12 : W[A.state.name],
                           W[B.state.name] === undefined ? 0.12 : W[B.state.name]);
     this.intensity += (want - this.intensity) * Math.min(1, dt / 0.7);
@@ -234,13 +276,24 @@ export class FightDirector {
     this.engage = this.phase === 'engage' ? 1 : 0;
     const sep = Math.abs(A.x - B.x);
     const target = this.gapTarget;
-    const rate = (target < sep ? 2.3 : 1.6);      // close fast, back off slower
-    const step = Math.sign(target - sep) * Math.min(Math.abs(target - sep), rate * dt);
+    // v14: the gap used to close at a CONSTANT rate and then stop dead, which
+    // read as a marching step each phase. An exponential approach (a fraction
+    // of the remaining distance per step, capped so a surprise phase change
+    // cannot teleport anyone) glides in and settles onto the target.
+    const closeRate = 2.6, backRate = 1.8;        // 1/s approach rates
+    const rate = target < sep ? closeRate : backRate;
+    const remain = target - sep;
+    const step = Math.sign(remain) *
+      Math.min(Math.abs(remain) * Math.min(1, rate * dt), rate * dt);
     // move both cats symmetrically around the midpoint; while circling add a
-    // subtle lateral hunt so they look like they are working for an angle
-    const hunt = this.phase === 'circle' ? Math.sin(this.circlePhase * 1.7) * 0.10 : 0;
-    let ax = this.mid + step / 2 + hunt;
-    let bx = this.mid - step / 2 - hunt * 0.6;
+    // subtle lateral hunt so they look like they are working for an angle.
+    // v14: the hunt is low-passed and fades by distance instead of switching
+    // off with the phase - no sideways snap when the phase flips.
+    const huntWant = this.phase === 'circle' ? Math.sin(this.circlePhase * 1.7) * 0.10 : 0;
+    this.hunt += (huntWant - this.hunt) * Math.min(1, dt * 2.4);
+    const huntEff = this.hunt * clamp((sep - 1.3) / 0.9, 0, 1);  // fade when close
+    let ax = this.mid + step / 2 + huntEff;
+    let bx = this.mid - step / 2 - huntEff * 0.6;
     // keep cat A on the +x side (its facing), B on the -x side
     if (ax < bx) { const t = ax; ax = bx; bx = t; }
     const lim = DIM.spanHalf - DIM.poleClearance - 0.4;
@@ -387,8 +440,17 @@ export class FightDirector {
     return true;
   }
 
-  _start(side, move, data = {}, reason = 'tempo') {
+  _start(side, move, data = {}, reason = 'tempo', opts = {}) {
     const spec = MOVES[move];
+    // v14 guard: beat callbacks can race the state they raced to schedule (a
+    // lock or a stumble landed in between). If the move name is unknown or the
+    // fighter can no longer act, refuse instead of crashing on spec.cool.
+    if (!spec || !this.cats[side] || !this._canMove(side, move)) {
+      if (!spec) {  // unknown move name: record it, never crash
+        (this._badMoves = this._badMoves || []).push({ t: +this.now.toFixed(2), side, move: String(move) });
+      }
+      return false;
+    }
     this.log.push({ t: +this.now.toFixed(2), side, move, reason });
     if (this.log.length > 400) this.log.shift();
     this.reasons[reason] = (this.reasons[reason] || 0) + 1;
@@ -399,18 +461,44 @@ export class FightDirector {
     }
     this._lastUsed[move] = this.now;
     this.cools[move] = this.now + spec.cool;
-    this.sideCool[side] = this.now + 0.55;   // short: the other cat answers fast
+    // v14: a chained combo move skips its side's breather (it is one action),
+    // but the per-move cooldown still applies so a chain cannot machine-gun.
+    if (!opts.chain) this.sideCool[side] = this.now + 0.55;
     this.active[side] = move;
     this.lastMoveAt = this.now;
     this._lastMover = side;
     this.stats.moves++;
     cat.setState(move, spec.len, data);
-    // the opponent reacts: parry or counter, which is what makes clashes happen
+    // v14: the combo chain. If this move has a follow-up, check for it just
+    // after the move ends (mid-RECOVER, still one phrase): a lunge flows into
+    // the thrust, a beat into the riposte. Depth caps the phrase at three
+    // moves; a lock, a clash or a cooldown kills it, which is exactly how a
+    // real exchange dies.
+    const cb = COMBO[move];
+    if (cb) {
+      const depth = data.chainDepth || 0;
+      if (depth < 2) {
+        this._after(spec.len + cb.win * 0.55, () => {
+          const chance = depth === 0 ? 0.55 : 0.25;
+          if (Math.random() > chance) return;
+          if (!this._canMove(side, cb.next)) return;
+          this.stats.combos = (this.stats.combos || 0) + 1;
+          this._start(side, cb.next, { dir: this._fw(side), chainDepth: depth + 1 }, 'combo', { chain: true });
+        });
+      }
+    }
+    // the opponent reacts: parry or counter, which is what makes clashes happen.
+    // v14: the answer is now MOVE-AWARE instead of a coin flip - a feint baits
+    // the parry, a charge is sidestepped, a thrust is beaten. That is what
+    // "technical" means here: the reply matches the technique, every time.
     const foe = side === 'A' ? 'B' : 'A';
-    // the counter used to fire on a fresh coin flip half the time, which doubled the
-    // attack rate unpredictably; it now shares the beat's spacing
     if (OFFENSIVE.has(move) && !this.active[foe] && this.now - this._lastAnswerAt > 0.42 && Math.random() < 0.45) {
-      const def = foe === 'B' ? 'PARRY_HOP' : 'LUNGE';
+      // a feint exists to be answered: raise the reply odds so the bait pays
+      const chance = move === 'FEINT' ? 0.75 : 0.45;
+      if (Math.random() >= chance) return;
+      // REACTION[move] is { side: moveName } - index by the REPLYING side
+      const table = REACTION[move];
+      const def = (table && table[foe]) || (foe === 'B' ? 'PARRY_HOP' : 'LUNGE');
       if (this._canMove(foe, def)) {
         this._start(foe, def, { dir: this._fw(foe) }, 'reaction');
         this._lastAnswerAt = this.now;
@@ -509,9 +597,13 @@ export class FightDirector {
       this.phaseT = 0;
       this.phaseDur = 0.5 + Math.random() * 0.5;
       this.gapTarget = 2.1 + Math.random() * 0.7;
-      // follow-up: the winner gets an immediate extra attack (momentum)
+      // follow-up: the winner gets an immediate extra attack (momentum).
+      // v14: rotated instead of always the same move - pressure plays a
+      // different card each time it wins the exchange.
       this._after(0.05, () => {
-        const mv = winner === 'A' ? 'RUSH' : 'SLASH_SPIN';
+        const mv = (winner === 'A')
+          ? (['RUSH', 'THRUST', 'SLASH_UP'][Math.floor(Math.random() * 3)])
+          : (['SLASH_SPIN', 'RIPOSTE', 'LUNGE'][Math.floor(Math.random() * 3)]);
         if (this._canMove(winner, mv)) this._start(winner, mv, { dir: this._fw(winner) });
       });
     });

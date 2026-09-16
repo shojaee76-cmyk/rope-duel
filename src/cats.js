@@ -30,6 +30,14 @@ const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
 
+// ---- v14 technique easing --------------------------------------------------
+// A strike reads as technique when every phase of a move ACCELERATES in and
+// SETTLES out instead of running at constant speed: the old phases fed their
+// linear fractions straight into the pose targets, so a lunge moved like a
+// trolley. smooth() shapes strikes, easeOut() shapes releases and skids.
+const smooth = (t) => t * t * (3 - 2 * t);
+const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+
 // ---------- texture cache (one canvas set per look, shared by every mesh) ----------
 const TEX = new Map();
 function tex(key, make) {
@@ -579,6 +587,14 @@ const IDLE_TEMPLATE = IDLE_POSE();
 
 const NUM_KEYS = Object.keys(IDLE_TEMPLATE);
 
+// v14: per-move RECOVER lengths (the comic windmill every move ends with).
+// One flat 0.16 s made every move stop the same way; a wrist feint and a full
+// charging lunge visibly do not cost the same effort. Scaled per move below.
+const RECOVER_T = {
+  RUSH: 0.30, LUNGE: 0.22, SLASH_UP: 0.20, THRUST: 0.18, SLASH_SPIN: 0.24,
+  RIPOSTE: 0.24, FEINT: 0.10, PARRY_HOP: 0.10, PARRY_BEAT: 0.08, TAUNT: 0.16, HIT: 0.14
+};
+
 export class DuelCat {
   constructor(kind) {
     this.data = kind === 'A' ? buildDonGato() : buildSultanBigotes();
@@ -621,8 +637,11 @@ export class DuelCat {
       case 'RUSH': this._rush(ctx); break;
       case 'LUNGE': this._lunge(ctx); break;
       case 'SLASH_UP': this._slashUp(ctx); break;
+      case 'THRUST': this._thrust(ctx); break;
+      case 'FEINT': this._feint(ctx); break;
       case 'TAUNT': this._taunt(ctx); break;
       case 'PARRY_HOP': this._parryHop(ctx); break;
+      case 'PARRY_BEAT': this._parryBeat(ctx); break;
       case 'SLASH_SPIN': this._slashSpin(ctx); break;
       case 'RIPOSTE': this._riposte(ctx); break;
       case 'FREEZE': this._freeze(ctx); break;
@@ -634,9 +653,11 @@ export class DuelCat {
       default: this._idle(ctx);
     }
 
-    // timed states auto-transition to the comic windmill RECOVER (spec 7.2)
+    // timed states auto-transition to the comic windmill RECOVER (spec 7.2).
+    // v14: the windmill length scales with the move - a feint or a parry hop
+    // only needs a flick of the wrists, a full charge earns the big windmill.
     if (st.dur > 0 && st.t >= st.dur && st.name !== 'RECOVER' && st.name !== 'FREEZE' && st.name !== 'BLADE_LOCK') {
-      this.setState('RECOVER', 0.16);
+      this.setState('RECOVER', RECOVER_T[st.name] || 0.16);
     }
 
     // smooth toward target pose: v5 settles ~2x faster so short moves read
@@ -772,12 +793,13 @@ export class DuelCat {
     this.target.tilt = Math.sin(f * Math.PI * 2) * 0.14;
   }
 
-  // charge in: three loud paw stamps (rope gets nudged), then blade first
+  // charge in: three loud paw stamps (rope gets nudged), then blade first.
+  // v14: the charge accelerates (smooth), the skid settles (easeOut).
   _rush(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
     const reach = s.data.reach || 0.6;
     if (f < 0.34) {
-      const sf = f / 0.34;
+      const sf = smooth(f / 0.34);
       const pulse = Math.abs(Math.sin(sf * Math.PI * 3));
       tg.crouch = 0.06 + pulse * 0.1;
       tg.knL = -0.2 - pulse * 0.5;
@@ -789,7 +811,7 @@ export class DuelCat {
       if (sf > 0.42 && !s.data.st2) { s.data.st2 = 1; ctx.onStamp && ctx.onStamp(this); }
       if (sf > 0.75 && !s.data.st3) { s.data.st3 = 1; ctx.onStamp && ctx.onStamp(this); }
     } else if (f < 0.7) {
-      const lf = (f - 0.34) / 0.36;
+      const lf = smooth((f - 0.34) / 0.36);
       tg.xOff = this.fw * lf * reach;
       tg.spineLean = 0.3 + lf * 0.5;
       tg.twist = this.fw * 0.18;
@@ -799,7 +821,7 @@ export class DuelCat {
       tg.yOff = Math.sin(lf * Math.PI) * 0.06;
       if (lf > 0.35 && !s.data.sp) { s.data.sp = 1; ctx.onLungeHit && ctx.onLungeHit(this); }
     } else {
-      const sf = (f - 0.7) / 0.3;
+      const sf = easeOut((f - 0.7) / 0.3);
       tg.xOff = this.fw * (reach - sf * 0.1);
       tg.spineLean = 0.8 - sf * 0.5;
       tg.tilt = Math.sin(sf * Math.PI) * 0.14;
@@ -811,15 +833,15 @@ export class DuelCat {
   _lunge(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
     const reach = s.data.reach || 0.7;
-    if (f < 0.3) { // coil back, blade drawn
-      const cf = f / 0.3;
+    if (f < 0.3) { // coil back, blade drawn - the coil loads slowly (anticipation)
+      const cf = smooth(f / 0.3);
       tg.crouch = 0.1 * cf;
       tg.spineLean = -0.12 * cf;
       tg.shS_z = -0.5 - cf * 0.5; tg.elS = -1.0;
       tg.knL = -0.2 - cf * 0.35;
       tg.twist = -this.fw * 0.16 * cf;
-    } else if (f < 0.62) { // explode forward, blade first
-      const lf = (f - 0.3) / 0.32;
+    } else if (f < 0.62) { // explode forward, blade first - fast out of the coil
+      const lf = smooth((f - 0.3) / 0.32);
       tg.xOff = this.fw * lf * reach;
       tg.spineLean = 0.25 + lf * 0.55;
       tg.twist = this.fw * 0.2;
@@ -829,8 +851,8 @@ export class DuelCat {
       tg.yOff = Math.sin(lf * Math.PI) * 0.05;
       tg.thL = 0.06 + lf * 0.5;
       if (lf > 0.4 && !s.data.sp) { s.data.sp = 1; ctx.onLungeHit && ctx.onLungeHit(this); }
-    } else { // skid
-      const sf = (f - 0.62) / 0.38;
+    } else { // skid - friction, not a wall
+      const sf = easeOut((f - 0.62) / 0.38);
       tg.xOff = this.fw * (reach - sf * 0.12);
       tg.spineLean = 0.8 - sf * 0.5;
       tg.tilt = Math.sin(sf * Math.PI) * 0.16;
@@ -841,15 +863,15 @@ export class DuelCat {
 
   _slashUp(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
-    if (f < 0.3) { // cape twirl toward the moon
-      const cf = f / 0.3;
+    if (f < 0.3) { // cape twirl toward the moon - windup gathers (smooth)
+      const cf = smooth(f / 0.3);
       tg.twist = -0.5 * cf * this.fw * -1;
       tg.shO_z = -0.2 - cf * 1.5; tg.shO_x = 0.45;
       tg.headPitch = -0.35 * cf;
       tg.capeRaise = cf * 0.55;
       tg.crouch = 0.05 * cf;
-    } else if (f < 0.72) { // rising diagonal slash
-      const sf = (f - 0.3) / 0.42;
+    } else if (f < 0.72) { // rising diagonal slash - crack through fast, settle late
+      const sf = smooth((f - 0.3) / 0.42);
       tg.shS_z = -0.75 + sf * 2.5;
       tg.shS_x = -0.5 + sf * 1.2;
       tg.elS = -0.8 + sf * 0.65;
@@ -858,11 +880,62 @@ export class DuelCat {
       tg.yOff = Math.sin(sf * Math.PI) * 0.14;
       tg.thL = 0.06 + sf * 0.4;
       if (sf > 0.4 && !s.data.sl) { s.data.sl = 1; ctx.onSlash && ctx.onSlash(this, 'up'); }
-    } else { // follow-through pose
+    } else { // follow-through pose - decelerates into the pose
+      const ff = easeOut((f - 0.72) / 0.28);
       tg.shS_z = 1.55; tg.elS = -0.18;
       tg.headPitch = -0.42;
-      tg.capeRaise = 0.65;
+      tg.capeRaise = 0.55 + ff * 0.1;
       tg.tilt = -0.1;
+    }
+  }
+
+  // v14 NEW (Don Gato): the fencing stop-thrust. A short blade-first poke with
+  // almost no travel, fast out, fast back: reads as precise point control next
+  // to the big sweeping cuts, and chains after a lunge.
+  _thrust(ctx) {
+    const f = this.moveFrac, tg = this.target, s = this.state;
+    if (f < 0.26) { // guard lifts, weight coils - short, crisp
+      const cf = smooth(f / 0.26);
+      tg.crouch = 0.06 * cf;
+      tg.spineLean = -0.08 * cf;
+      tg.shS_z = -0.4 - cf * 0.2; tg.elS = -1.15;
+      tg.headYaw = -this.fw * 0.08;
+    } else if (f < 0.52) { // the point darts out, arm fully extended
+      const pf = smooth((f - 0.26) / 0.26);
+      tg.shS_z = -0.6 + pf * 2.25; tg.shS_x = 0.55 * pf;
+      tg.elS = -1.15 + pf * 1.13;
+      tg.spineLean = -0.08 + pf * 0.5;
+      tg.xOff = this.fw * pf * 0.22;
+      tg.headYaw = -this.fw * (0.08 - pf * 0.08);
+      if (pf > 0.5 && !s.data.th) { s.data.th = 1; ctx.onThrust && ctx.onThrust(this); }
+    } else { // reprise guard - the arm folds straight back
+      const rf = easeOut((f - 0.52) / 0.48);
+      tg.shS_z = 1.65 - rf * 1.0; tg.elS = -0.02 - rf * 0.6;
+      tg.spineLean = 0.42 - rf * 0.3;
+      tg.xOff = this.fw * (0.22 - rf * 0.16);
+    }
+  }
+
+  // v14 NEW (Don Gato): the feint. A convincing half-lunge that aborts early
+  // and flows into a guard: it baits the foe's parry (the director chains it)
+  // and reads as ring craft rather than another swing.
+  _feint(ctx) {
+    const f = this.moveFrac, tg = this.target;
+    if (f < 0.4) { // sell the lunge - same shape, ~60% of the travel
+      const lf = smooth(f / 0.4);
+      tg.crouch = 0.05 * lf;
+      tg.spineLean = 0.3 * lf;
+      tg.shS_z = 0.9 * lf; tg.elS = -0.5 + lf * 0.15;
+      tg.xOff = this.fw * lf * 0.18;
+      tg.headYaw = this.fw * 0.14 * lf;
+    } else { // abort: the body settles back, blade stays high and live
+      const ab = easeOut((f - 0.4) / 0.6);
+      tg.crouch = 0.05 - ab * 0.02;
+      tg.spineLean = 0.3 - ab * 0.18;
+      tg.shS_z = 0.9 - ab * 0.35;
+      tg.elS = -0.35;
+      tg.xOff = this.fw * (0.18 - ab * 0.14);
+      tg.headYaw = this.fw * (0.14 - ab * 0.1);
     }
   }
 
@@ -889,7 +962,7 @@ export class DuelCat {
 
   _parryHop(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
-    if (f < 0.45) { // two hard sidesteps
+    if (f < 0.45) { // two hard sidesteps - steps land on a smooth hop arc
       const sf = f / 0.45;
       const step = Math.sin(sf * Math.PI * 2);
       tg.xOff = -this.fw * step * 0.4;      // lateral: sideways along the rope
@@ -899,8 +972,8 @@ export class DuelCat {
       tg.thR = 0.06 + Math.max(0, -step) * 0.6;
       tg.yOff = Math.abs(step) * 0.08;
       if (sf > 0.4 && !s.data.sd) { s.data.sd = 1; ctx.onStamp && ctx.onStamp(this); }
-    } else { // low blade sweep across
-      const pf = (f - 0.45) / 0.55;
+    } else { // low blade sweep across - accelerates through, settles at the guard
+      const pf = smooth((f - 0.45) / 0.55);
       tg.crouch = 0.11;
       tg.spineLean = 0.4;
       tg.shS_z = 0.45 - pf * 0.5; tg.shS_x = -0.6; tg.elS = -1.15;
@@ -910,10 +983,32 @@ export class DuelCat {
     }
   }
 
+  // v14 NEW (Sultan): the parry beat. A crisp timing beat of the flat against
+  // the incoming blade - short, loud, almost stationary: the technician's
+  // answer to a feint, which then chains into the riposte.
+  _parryBeat(ctx) {
+    const f = this.moveFrac, tg = this.target, s = this.state;
+    if (f < 0.3) { // the beat: blade flicks across fast, body stays home
+      const bf = smooth(f / 0.3);
+      tg.shS_z = -0.5 + bf * 1.35;
+      tg.elS = -0.9 + bf * 0.75;
+      tg.shS_x = -0.2 + bf * 0.35;
+      tg.crouch = 0.03;
+      tg.headYaw = this.fw * 0.06;
+      if (bf > 0.55 && !s.data.bt) { s.data.bt = 1; ctx.onBeat && ctx.onBeat(this); }
+    } else { // recover the line: blade draws back to guard
+      const rf = easeOut((f - 0.3) / 0.7);
+      tg.shS_z = 0.85 - rf * 1.3;
+      tg.elS = -0.15 - rf * 0.5;
+      tg.shS_x = 0.15;
+      tg.crouch = 0.03 + rf * 0.02;
+    }
+  }
+
   _slashSpin(ctx) {
     const f = this.moveFrac, tg = this.target;
-    if (f < 0.45) { // scimitar windmill x2 overhead
-      const wf = f / 0.45;
+    if (f < 0.45) { // scimitar windmill x2 overhead - starts slow, whips up
+      const wf = smooth(f / 0.45);
       tg.shS_z = -0.7 + wf * Math.PI * 4;
       tg.elS = -0.2;
       tg.spineLean = -0.12;
@@ -921,14 +1016,14 @@ export class DuelCat {
       tg.twist = wf * 0.5 * this.fw;
       tg.yOff = Math.sin(wf * Math.PI) * 0.1;
       if (wf > 0.3 && !this.state.data.w1) { this.state.data.w1 = 1; ctx.onWhoosh && ctx.onWhoosh(this); }
-    } else { // triple downward cuts
+    } else { // triple downward cuts - each cut eases in and settles
       const cf = (f - 0.45) / 0.55;
       const chop = Math.abs(Math.sin(cf * Math.PI * 3));
       tg.shS_z = 1.45 - chop * 1.85;
       tg.elS = -0.35;
       tg.spineLean = 0.15 + chop * 0.28;
       tg.crouch = 0.05 + chop * 0.09;
-      tg.xOff = this.fw * 0.3 * cf;
+      tg.xOff = this.fw * 0.3 * easeOut(cf);
       if (cf > 0.25 && !this.state.data.c1) { this.state.data.c1 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
       if (cf > 0.72 && !this.state.data.c2) { this.state.data.c2 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
     }
@@ -936,28 +1031,28 @@ export class DuelCat {
 
   _riposte(ctx) {
     const f = this.moveFrac, tg = this.target;
-    if (f < 0.22) { // duck under the thrust
-      const df = f / 0.22;
+    if (f < 0.22) { // duck under the thrust - the drop quickens into the dip
+      const df = smooth(f / 0.22);
       tg.crouch = 0.24 * df;
       tg.spineLean = 0.55 * df;
       tg.headPitch = 0.24;
       tg.knL = -0.2 - df * 0.5; tg.knR = -0.2 - df * 0.5;
-    } else if (f < 0.46) { // whirl behind the foe
+    } else if (f < 0.46) { // whirl behind the foe - spins up fast, lands soft
       const wf = (f - 0.22) / 0.24;
-      tg.twist = Math.sin(wf * Math.PI) * 1.9 * this.fw;
+      tg.twist = Math.sin(smooth(wf) * Math.PI) * 1.9 * this.fw;
       tg.crouch = 0.14;
       tg.shS_z = -1.3;
       tg.xOff = -this.fw * Math.sin(wf * Math.PI) * 0.3;
-    } else if (f < 0.74) { // crescent slash arc
-      const cf = (f - 0.46) / 0.28;
+    } else if (f < 0.74) { // crescent slash arc - drawn through with intent
+      const cf = smooth((f - 0.46) / 0.28);
       tg.shS_z = -1.5 + cf * 2.7;
       tg.shS_x = -1.0 + cf * 0.7;
       tg.elS = -0.25;
       tg.twist = this.fw * (0.35 - cf * 0.6);
       tg.xOff = this.fw * 0.35 * cf;
       if (cf > 0.4 && !this.state.data.cr) { this.state.data.cr = 1; ctx.onSlash && ctx.onSlash(this, 'crescent'); }
-    } else { // counter-thrust
-      const pf = (f - 0.74) / 0.26;
+    } else { // counter-thrust - settles into the extension
+      const pf = easeOut((f - 0.74) / 0.26);
       tg.spineLean = 0.4;
       tg.shS_z = 1.6; tg.elS = -0.08;
       tg.xOff = this.fw * (0.35 + pf * 0.45);
@@ -974,13 +1069,14 @@ export class DuelCat {
     ctx.flagDart = true;
   }
 
-  // short reel: head snaps back, off arm flails, feet skid - the quick hit read
+  // short reel: head snaps back, off arm flails, feet skid - the quick hit read.
+  // v14: an impact is an impulse - fastest at f=0 (easeOut), then it decays.
   _hit(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
     const dir = s.data.dir || -this.fw; // world-x the body is thrown toward
     const mag = s.data.mag || 1;
     if (f < 0.4) {
-      const hf = f / 0.4;
+      const hf = easeOut(f / 0.4);
       tg.spineLean = -0.4 * hf * mag;
       tg.headPitch = 0.5 * hf * mag;
       tg.headYaw = -dir * 0.3 * hf;
@@ -1068,7 +1164,9 @@ export class DuelCat {
     tg.lock = 0.5;
     tg.tremble = 0.9;
     if (s.data.loser) {
-      const sf = Math.min(f / 0.62, 1);
+      // v14: the shove lands hard then friction takes over (easeOut), not a
+      // constant-speed slide across the rope
+      const sf = easeOut(Math.min(f / 0.62, 1));
       tg.xOff = s.data.dir * sf * 0.75;   // driven back
       tg.tilt = -sf * 0.24;
       tg.spineLean = 0.45 - sf * 0.3;
