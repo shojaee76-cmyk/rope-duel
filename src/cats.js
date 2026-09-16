@@ -24,7 +24,8 @@
 //   lock           = blade-lock shove (0..1)   tremble = impact vibration (0..1)
 import * as THREE from '../vendor/three.module.js';
 import { CAT_A, CAT_B, MATERIALS, DIM } from './palette.js';
-import { furTexture, clothTexture, metalTexture, leatherTexture, pleatTexture, slashTexture } from './tex.js';
+import { furTexture, clothTexture, metalTexture, leatherTexture, pleatTexture } from './tex.js';
+import { robeTexture, knightClothTexture, eyeTexture } from './costume-textures.js';
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -84,6 +85,58 @@ const cone = (r, h, seg = 10) => new THREE.ConeGeometry(r, h, seg);
 const torus = (r, t, arc = Math.PI * 2) => new THREE.TorusGeometry(r, t, 8, 20, arc);
 const cyl = (rt, rb, h, seg = 10) => new THREE.CylinderGeometry(rt, rb, h, seg);
 
+// Join small static details by material: curved whiskers and seams cost one
+// draw each, rather than one mesh for every stitch or strand.
+function joined(geometries) {
+  const arrays = { position: [], normal: [], uv: [] };
+  for (const source of geometries) {
+    const g = source.index ? source.toNonIndexed() : source;
+    for (const key of Object.keys(arrays)) arrays[key].push(...g.attributes[key].array);
+    if (g !== source) g.dispose();
+    source.dispose();
+  }
+  const result = new THREE.BufferGeometry();
+  for (const key of Object.keys(arrays)) result.setAttribute(key,
+    new THREE.Float32BufferAttribute(arrays[key], key === 'uv' ? 2 : 3));
+  return result;
+}
+function stroke(points, radius = 0.003, steps = 12) {
+  const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p => new V3(...p))), steps, radius, 5, false);
+  return g;
+}
+// Soft gathered cloth only moves IN from its existing envelope. Waist and hem
+// heights are unchanged, including the skirt's local +/-0.27 hitch anchors.
+function foldedCylinder(rt, rb, h, segments = 32, rows = 6, folds = 10, depth = 0.01) {
+  const g = new THREE.CylinderGeometry(rt, rb, h, segments, rows, true);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const t = clamp(0.5-y/h, 0, 1), angle = Math.atan2(x,z);
+    const gather = (0.5+0.5*Math.cos(angle*folds + Math.sin(t*Math.PI)*0.32));
+    const inset = depth * gather * (0.28+0.72*Math.sin(t*Math.PI/2));
+    const r = Math.hypot(x,z), k = (r-inset)/r;
+    p.setXYZ(i,x*k,y,z*k);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+// Convex almond cap: local XY is the lid opening, local +Z faces out.
+function almond(w, h, depth = 0.009) {
+  const vertices = [0,0,depth], uv = [0.5,0.5], indices = [];
+  const n = 32;
+  for (let i = 0; i < n; i++) {
+    const a = i/n*Math.PI*2, x = Math.cos(a)*w/2;
+    const y = Math.sin(a)*h/2*(0.72+0.28*Math.abs(Math.sin(a)));
+    vertices.push(x,y,0); uv.push(x/w+0.5,y/h+0.5);
+    indices.push(0,i+1,(i+1)%n+1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  g.setIndex(indices); g.computeVertexNormals();
+  return g;
+}
+
 // pivot with a limb segment hanging along -Y
 function limb(parent, x, y, z, len, r, mat) {
   const pivot = new THREE.Group();
@@ -105,7 +158,13 @@ function buildRig(c) {
     fur: std(c.furBase, 'fur', { bumpScale: 0.04 }, furPair),
     belly: std(c.furBelly, 'fur', { bumpScale: 0.03 }, bellyPair),
     inner: std(c.earInner, 'fur', {}, furPair),
-    eye: std(c.eye, 'steel', { emissive: c.eye, emissiveIntensity: c.eyeGlow, roughness: 0.35 }),
+    eye: std('#FFFFFF', 'fur', { emissive: c.eye, emissiveIntensity: 0.08, roughness: 0.28 },
+      tex(`eye-${c.eye}`, () => eyeTexture(c.eye))),
+    cheek: std(c.furBelly, 'fur', { roughness: 0.94 }),
+    lid: std(c.furKey === 'A-fur' ? '#695346' : '#424651', 'fur'),
+    socket: std('#25252C', 'fur'),
+    brow: std(c.furKey === 'A-fur' ? '#C08A52' : '#CAD0D3', 'fur'),
+    // Eyes are one mapped convex almond per side; no block pupil overlays.
     pupil: std('#101014', 'fur'),
     nose: std(c.nose, 'fur'),
     whisker: std('#FFFFFF', 'fur', { roughness: 0.45 }),
@@ -136,20 +195,71 @@ function buildRig(c) {
   const skull = mesh(sphere(0.205, 18, 14), M.fur);
   skull.scale.set(1.05, 0.95, 0.95);
   head.add(skull);
-  const muzzle = mesh(box(0.2, 0.11, 0.16), M.fur, 0.17, -0.05, 0);
-  head.add(muzzle);
-  const nose = mesh(sphere(0.028, 8, 6), M.nose, 0.27, -0.03, 0);
-  head.add(nose);
-  const mouth = mesh(torus(0.05, 0.008, Math.PI * 0.9), M.mouth, 0.24, -0.09, 0);
-  mouth.rotation.y = Math.PI / 2;
-  mouth.rotation.z = Math.PI + 0.25;
-  head.add(mouth);
-  for (const sz of [1, -1]) {
-    const e = mesh(sphere(0.045, 12, 10), M.eye, 0.12, 0.07, sz * 0.105);
-    head.add(e);
-    const pup = mesh(box(0.012, 0.05, 0.02), M.pupil, 0.158, 0.07, sz * 0.107);
-    head.add(pup);
+  // Paired whisker pads and a tucked chin replace the rectangular snout.
+  // Nose remains inside x=.30, matching headTipWorld and the contact solver.
+  const cheekGeos = [];
+  for (const sz of [-1, 1]) {
+    const g = new THREE.SphereGeometry(1, 16, 10);
+    g.scale(0.082, 0.057, 0.061); g.translate(0.196, -0.046, sz*0.047);
+    cheekGeos.push(g);
   }
+  const chin = new THREE.SphereGeometry(1, 14, 8);
+  chin.scale(0.061,0.035,0.069); chin.translate(0.189,-0.094,0);
+  cheekGeos.push(chin);
+  const muzzle = mesh(joined(cheekGeos), M.cheek);
+  muzzle.name = 'rounded-feline-muzzle'; head.add(muzzle);
+  const nose = mesh(new THREE.SphereGeometry(0.025, 12, 8), M.nose, 0.271, -0.023, 0);
+  nose.scale.set(0.72,0.65,1);
+  // Rounded triangular nose: broad above, pinched at the philtrum.
+  const np = nose.geometry.attributes.position;
+  for (let i=0; i<np.count; i++) np.setZ(i,np.getZ(i)*(0.65+0.35*(np.getY(i)/0.025+1)/2));
+  nose.geometry.computeVertexNormals(); head.add(nose);
+  const don = c.furKey === 'A-fur';
+  const mouthGeos = [stroke([[0.282,-0.033,0],[0.280,-0.052,0],[0.277,-0.062,0]],0.0027,6)];
+  for (const sz of [-1,1]) {
+    mouthGeos.push(stroke([[0.277,-0.060,0],[0.273,-0.075,sz*0.024],
+      [0.253,-0.073,sz*0.056],[0.233,don && sz===1 ? -0.053 : -0.064,sz*0.079]],0.0026,9));
+    // Each eye faces diagonally forward and outward so the camera-side eye
+    // remains readable at profile, rather than disappearing inside the skull.
+    const eye = new THREE.Group();
+    eye.position.set(0.143,0.065,sz*0.135);
+    eye.rotation.y = sz > 0 ? 0.77 : Math.PI-0.77;
+    eye.rotation.z = sz*(don ? 0.10 : -0.09);
+    const height = don && sz===1 ? 0.065 : don ? 0.057 : 0.050;
+    const socket = mesh(almond(0.105,height+0.013,0.009),M.socket);
+    const iris = mesh(almond(0.093,height,0.011),M.eye,0,0,0.004);
+    iris.name = 'almond-eye-slit-pupil';
+    eye.add(socket,iris);
+    const lid = mesh(stroke([[-0.051,0,0.004],[-0.026,height*0.47,0.009],
+      [0,height*0.54,0.01],[0.029,height*0.40,0.009],[0.052,0,0.004]],0.003,10),M.lid);
+    eye.add(lid);
+    const brow = mesh(stroke([[-0.043,height*0.58,0],[-0.018,height*0.79,0.002],
+      [0.020,height*(don && sz===1 ? 0.92 : 0.69),0]],0.005,8),M.brow);
+    eye.add(brow); head.add(eye);
+  }
+  head.add(mesh(joined(mouthGeos),M.mouth));
+  const whiskerGeos = [];
+  for (const sz of [-1,1]) for (let i=0; i<3; i++) {
+    // Swept-back whiskers end within radius .32; never project into the foe.
+    const points = [[0.235,-0.036-i*0.015,sz*0.078],
+      [0.228,-0.038-i*0.018,sz*0.139],
+      [0.195,-0.021-i*0.025,sz*0.204],
+      [0.143,-0.005-i*0.031,sz*(0.257-i*0.009)]];
+    const curve = new THREE.CatmullRomCurve3(points.map(p=>new V3(...p)));
+    const g = new THREE.TubeGeometry(curve,12,0.0027,4,false);
+    const p = g.attributes.position;
+    for (let j=0; j<=12; j++) {
+      const centre = curve.getPointAt(j/12), taper = 1-j/12*0.86;
+      for (let k=0; k<=4; k++) {
+        const idx=j*5+k;
+        p.setXYZ(idx,centre.x+(p.getX(idx)-centre.x)*taper,
+          centre.y+(p.getY(idx)-centre.y)*taper,centre.z+(p.getZ(idx)-centre.z)*taper);
+      }
+    }
+    g.computeVertexNormals(); whiskerGeos.push(g);
+  }
+  const whiskers = mesh(joined(whiskerGeos),M.whisker);
+  whiskers.name = 'swept-tapered-whiskers'; whiskers.castShadow=false; head.add(whiskers);
   const ears = [];
   for (const sz of [1, -1]) {
     const ear = new THREE.Group();
@@ -159,14 +269,6 @@ function buildRig(c) {
     ear.add(outer, inner);
     head.add(ear);
     ears.push(ear);
-  }
-  for (const sz of [1, -1]) {
-    for (let i = 0; i < 3; i++) {
-      const w = mesh(cyl(0.003, 0.003, 0.3, 4), M.whisker, 0.2, -0.04 + i * 0.03, sz * 0.09);
-      w.rotation.z = Math.PI / 2 + 0.12;
-      w.rotation.x = sz * (0.25 + i * 0.18);
-      head.add(w);
-    }
   }
 
   // arms
@@ -276,8 +378,8 @@ function buildScimitar() {
 
 // waving cape (A): pivot at the top, vertices swayed in update()
 function buildCape() {
-  const clothPair = tex('cloth-crimson', () => clothTexture({ seed: 52, weave: 6 }));
-  const matOut = std(CAT_A.crimsonMain, 'cloth', { side: THREE.DoubleSide }, clothPair);
+  const clothPair = tex('embroidered-cape', () => knightClothTexture('cape'));
+  const matOut = std('#FFFFFF', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.009 }, clothPair);
   const geo = new THREE.PlaneGeometry(0.52, 0.78, 10, 12);
   geo.translate(0, -0.39, 0);
   // baked folds: a flat sheet always reads as plastic, no matter the texture.
@@ -297,9 +399,8 @@ function buildCape() {
   }
   const cape = new THREE.Mesh(geo, matOut);
   cape.castShadow = true;
-  const trim = new THREE.Mesh(new THREE.PlaneGeometry(0.54, 0.06), std(CAT_A.goldBright, 'cloth', { side: THREE.DoubleSide }));
-  trim.position.y = -0.76;
-  cape.add(trim);
+  // Embroidered border follows the animated cloth UVs, no rigid floating bar.
+  cape.name = 'embroidered-red-cape';
   return cape;
 }
 
@@ -351,22 +452,51 @@ export function buildDonGato() {
   const brim = mesh(torus(0.185, 0.024), MA.steel, 0, 0.04, 0);
   brim.rotation.x = Math.PI / 2;
   brim.scale.set(1.18, 1.05, 1);
+  // The front and rear brim turn up, characteristic of a morion.
+  const brimPos = brim.geometry.attributes.position;
+  for (let i=0;i<brimPos.count;i++) {
+    const x = brimPos.getX(i);
+    brimPos.setZ(i,brimPos.getZ(i)-0.025*Math.pow(Math.abs(x)/0.209,3));
+  }
+  brim.geometry.computeVertexNormals();
   helm.add(brim);
-  // morion comb: the tall fore-and-aft ridge that identifies the helmet
-  const comb = mesh(box(0.34, 0.075, 0.032), MA.steel, 0, 0.175, 0);
-  comb.rotation.z = -0.05;
-  helm.add(comb);
-  helm.add(mesh(box(0.2, 0.045, 0.028), MA.steel, -0.09, 0.13, 0));
+  // Swept morion comb: a curved, tapered crest instead of stacked blocks.
+  const crest = new THREE.Shape();
+  crest.moveTo(-0.18,0.075);
+  crest.bezierCurveTo(-0.12,0.14,-0.105,0.224,-0.025,0.223);
+  crest.bezierCurveTo(0.055,0.228,0.11,0.155,0.18,0.075);
+  crest.quadraticCurveTo(0,0.14,-0.18,0.075);
+  const crestGeo = new THREE.ExtrudeGeometry(crest,{depth:0.022,bevelEnabled:true,
+    bevelThickness:0.004,bevelSize:0.004,bevelSegments:2,steps:1,curveSegments:12});
+  crestGeo.scale(1,0.85,1);
+  crestGeo.translate(0,0,-0.011);
+  helm.add(mesh(crestGeo,MA.steel));
+  const crestEdge = stroke([[-0.178,0.079,0],[-0.10,0.183,0],[-0.025,0.225,0],
+    [0.065,0.190,0],[0.178,0.08,0]],0.004,18);
+  crestEdge.scale(1,0.85,1);
+  helm.add(mesh(crestEdge,MA.goldBright));
   const trim = mesh(torus(0.165, 0.008), MA.goldBright, 0, 0.05, 0);
   trim.rotation.x = Math.PI / 2;
   trim.scale.set(1.2, 1.1, 1);
   helm.add(trim);
   helm.add(mesh(cyl(0.02, 0.025, 0.05, 8), MA.gold, 0.05, 0.16, -0.1));
   const plume = new THREE.Group();
-  plume.position.set(0.05, 0.2, -0.1);
+  plume.position.set(0.05, 0.125, -0.1);
+  const feathers = [];
   for (let i = 0; i < 3; i++) {
-    plume.add(mesh(sphere(0.035 - i * 0.007, 8, 6), MA.crimson, 0.02 * i, 0.035 * i, 0.015 * i));
+    const g = new THREE.PlaneGeometry(0.062-i*0.009,0.17-i*0.02,4,10);
+    const p = g.attributes.position;
+    for (let j=0;j<p.count;j++) {
+      const t = clamp(p.getY(j)/(0.17-i*0.02)+0.5,0,1);
+      const width = Math.pow(Math.max(0,Math.sin(Math.PI*t)),0.7);
+      p.setXYZ(j,-0.13*t+p.getX(j)*width,0.045*Math.sin(t*Math.PI*0.75),
+        i*0.012+p.getX(j)*width*0.25+0.008*Math.sin(t*12));
+    }
+    g.computeVertexNormals(); feathers.push(g);
   }
+  const featherMat = MA.crimson.clone(); featherMat.side = THREE.DoubleSide;
+  plume.add(mesh(joined(feathers),featherMat));
+  plume.add(mesh(stroke([[0,0,0],[-0.055,0.035,0],[-0.13,0.032,0]],0.0025,10),MA.gold));
   helm.add(plume);
   rig.head.add(helm);
   // ears poke through beside the dome
@@ -378,6 +508,17 @@ export function buildDonGato() {
   bp.rotation.z = -Math.PI / 2;
   bp.scale.set(1, 1, 0.72);
   rig.spine.add(bp);
+  // Rolled edge and repousse centre ridge share one mesh on the existing shell.
+  const armourEdges = [];
+  const edge = [];
+  for (let i=0;i<=30;i++) {
+    const a = i/30*Math.PI*2;
+    edge.push([-0.014,0.33+Math.cos(a)*0.162,Math.sin(a)*0.117]);
+  }
+  armourEdges.push(stroke(edge,0.005,30));
+  armourEdges.push(stroke([[0.142,0.47,0],[0.202,0.415,0],[0.226,0.33,0],
+    [0.202,0.245,0],[0.142,0.19,0]],0.004,14));
+  rig.spine.add(mesh(joined(armourEdges),MA.goldBright));
   rig.spine.add(mesh(box(0.028, 0.14, 0.02), MA.cross, 0.185, 0.34, 0));
   rig.spine.add(mesh(box(0.1, 0.028, 0.02), MA.cross, 0.19, 0.35, 0));
   rig.spine.add(mesh(sphere(0.035, 10, 8), MA.goldBright, 0.13, 0.47, 0));
@@ -398,7 +539,7 @@ export function buildDonGato() {
   // boots with folded cuffs, tassets over the thighs and a baldric.
   const leatherPair = tex('leather', () => leatherTexture({ seed: 43 }));
   const pleat = tex('pleat', () => pleatTexture({ pleats: 30 }));
-  const slashPair = tex('slash-doublet', () => slashTexture({ seed: 73, n: 6 }));
+  const slashPair = tex('embroidered-doublet', () => knightClothTexture('doublet'));
   const ruffMat = std('#FBF7EE', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.05 }, pleat);
   const ruff = mesh(new THREE.CylinderGeometry(0.16, 0.305, 0.1, 30, 1, true), ruffMat, 0.02, 0.47, 0);
   ruff.rotation.z = -0.06;
@@ -410,7 +551,7 @@ export function buildDonGato() {
   gorget.rotation.x = Math.PI / 2;
   gorget.scale.set(1, 1, 0.9);
   rig.spine.add(gorget);
-  const slashMat = std(CAT_A.crimsonMain, 'cloth', { bumpScale: 0.06 }, slashPair);
+  const slashMat = std('#FFFFFF', 'cloth', { bumpScale: 0.009 }, slashPair);
   for (const side of ['L', 'R']) {
     const cap = mesh(sphere(0.1, 12, 10), slashMat, 0, -0.015, 0);
     cap.scale.set(1, 0.76, 1.06);
@@ -444,7 +585,7 @@ export function buildDonGato() {
   rig.spine.add(mesh(sphere(0.038, 10, 8), MA.goldBright, 0.16, 0.5, 0));
 
   // tabard skirt with tail slit + gold fringe belt + bracers/shin guards
-  const tab = mesh(new THREE.CylinderGeometry(0.14, 0.19, 0.22, 10, 1, true, 0.5, Math.PI * 1.6), MA.crimson, -0.02, -0.08, 0);
+  const tab = mesh(new THREE.CylinderGeometry(0.14, 0.19, 0.22, 20, 3, true, 0.5, Math.PI * 1.6), slashMat, -0.02, -0.08, 0);
   tab.material.side = THREE.DoubleSide;
   rig.hips.add(tab);
   const fringe = mesh(torus(0.185, 0.012), MA.goldBright, -0.02, -0.19, 0);
@@ -522,18 +663,27 @@ export function buildSultanBigotes() {
     rig.tail[i].add(mesh(torus(0.04, 0.01), MB.stripe, 0, -0.065, 0));
   }
 
-  // turban: two-layer white wrap + SELL red band + silver crescent pin
+  // Turban: overlapping bias-cut white wraps, BUY green band, crescent pin.
   const turban = new THREE.Group();
   turban.position.set(0, 0.16, 0);
   turban.rotation.z = 0.08;
   const wrap = mesh(sphere(0.185, 16, 10), MB.white, 0, 0.02, 0);
   wrap.scale.set(1.08, 0.72, 1.02);
   turban.add(wrap);
-  turban.add(mesh(sphere(0.1, 12, 8), MB.white, -0.06, 0.13, 0));
-  const wrap2 = mesh(torus(0.13, 0.05), MB.white, 0, 0.05, 0);
-  wrap2.rotation.x = Math.PI / 2;
-  wrap2.scale.set(1.1, 1.05, 0.9);
-  turban.add(wrap2);
+  // Three broad overlapping cloth courses follow an oblique wrap, merged into
+  // one draw. Flattened torus sections read as folded fabric, not doughnuts.
+  const wrapGeos = [];
+  for (let i=0;i<3;i++) {
+    const g = new THREE.TorusGeometry(0.156-i*0.020,0.028,8,36);
+    g.rotateX(Math.PI/2); g.scale(1.08,0.55,1);
+    g.rotateZ(i%2 ? -0.16 : 0.15); g.rotateX(0.08);
+    g.translate(-i*0.008,0.012+i*0.036,0);
+    wrapGeos.push(g);
+  }
+  const crown = new THREE.SphereGeometry(0.104,16,10);
+  crown.scale(1.1,0.47,1); crown.translate(-0.026,0.112,0);
+  wrapGeos.push(crown);
+  turban.add(mesh(joined(wrapGeos),MB.white));
   const band = mesh(torus(0.155, 0.02), MB.emerald, 0, 0.03, 0);
   band.rotation.x = Math.PI / 2;
   band.scale.set(1.12, 1.06, 1);
@@ -550,26 +700,31 @@ export function buildSultanBigotes() {
   // ---- DISHDASHAH: the long loose robe the Moslem cat wears ----
   // Body over the torso (attached to the spine so it leans with the chest),
   // flared skirt on the hips with an animated hem, starched pleated collar,
-  // front placket with buttons, wide sleeves, SELL red trim on every edge.
-  const linen = tex('cloth-linen', () => clothTexture({ seed: 55, weave: 11, thread: 'rgba(122,114,98,0.34)' }));
+  // front placket with buttons, wide sleeves, BUY green embroidered edges.
+  const linen = tex('embroidered-robe', () => robeTexture('skirt'));
+  const bodyPair = tex('embroidered-placket', () => robeTexture('body'));
+  const sleevePair = tex('embroidered-cuffs', () => robeTexture('sleeve'));
   const pleat = tex('pleat', () => pleatTexture({ pleats: 30 }));
-  const dishMat = std(CAT_B.clothWhite, 'cloth', { side: THREE.DoubleSide, bumpScale: 0.05 }, linen);
+  const dishMat = std('#FFFFFF', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.007 }, linen);
+  const bodyMat = std('#FFFFFF', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.007 }, bodyPair);
+  const sleeveMat = std('#FFFFFF', 'cloth', { side: THREE.DoubleSide, bumpScale: 0.007 }, sleevePair);
   const trimMat = std(CAT_B.emeraldBright, 'cloth', {}, emeraldPair);
-  const body = mesh(new THREE.CylinderGeometry(0.188, 0.212, 0.44, 20, 1, true), dishMat, 0.005, 0.22, 0);
+  const body = mesh(foldedCylinder(0.188, 0.212, 0.44, 36, 6, 12, 0.008), bodyMat, 0.005, 0.22, 0);
   rig.spine.add(body);
   const collar = mesh(new THREE.CylinderGeometry(0.134, 0.156, 0.1, 20, 1, true), std(CAT_B.clothWhite, 'cloth', { side: THREE.DoubleSide }, pleat), 0.01, 0.455, 0);
   rig.spine.add(collar);
   const collarBand = mesh(torus(0.157, 0.013), trimMat, 0.01, 0.505, 0);
   collarBand.rotation.x = Math.PI / 2;
   rig.spine.add(collarBand);
-  const placket = mesh(box(0.04, 0.36, 0.05), trimMat, 0.178, 0.245, 0);
-  rig.spine.add(placket);
+  // Placket embroidery is mapped onto the cylinder at its true +X face;
+  // the old block was buried inside the robe. Three low-profile pearl buttons.
   for (const yy of [0.13, 0.24, 0.35]) {
-    rig.spine.add(mesh(sphere(0.014, 8, 6), MB.silver, 0.198, yy, 0));
+    rig.spine.add(mesh(sphere(0.014, 8, 6), MB.silver, 0.211, yy, 0));
   }
-  const skirt = mesh(new THREE.CylinderGeometry(0.212, 0.315, 0.54, 24, 1, true), dishMat, 0.005, -0.165, 0);
+  const skirt = mesh(foldedCylinder(0.212, 0.315, 0.54, 36, 8, 12, 0.016), dishMat, 0.005, -0.165, 0);
+  skirt.name = 'embroidered-folded-dishdashah';
   rig.hips.add(skirt);
-  const hem = mesh(torus(0.312, 0.014), trimMat, 0.005, -0.425, 0);
+  const hem = mesh(torus(0.302, 0.009), trimMat, 0.005, -0.425, 0);
   hem.rotation.x = Math.PI / 2;
   rig.hips.add(hem);
   // belt worn OVER the robe + the crescent moon pin
@@ -579,14 +734,14 @@ export function buildSultanBigotes() {
   rig.hips.add(belt);
   rig.hips.add(mesh(sphere(0.032, 10, 8),
     std('#EAF2FF', 'goldBright', { emissive: '#BFD4FF', emissiveIntensity: 0.35 }), 0.228, 0.02, 0));
-  // wide sleeves (upper arm + forearm) with SELL red cuffs
+  // Wide sleeves (upper arm + forearm) with BUY green embroidered cuffs.
   for (const side of ['L', 'R']) {
-    const sleeve = mesh(new THREE.CylinderGeometry(0.082, 0.098, 0.3, 14, 1, true), dishMat, 0, -0.14, 0);
+    const sleeve = mesh(foldedCylinder(0.082, 0.098, 0.3, 24, 5, 8, 0.006), sleeveMat, 0, -0.14, 0);
     rig.arms[side].shoulder.add(sleeve);
     const cuff = mesh(torus(0.092, 0.014), trimMat, 0, -0.285, 0);
     cuff.rotation.x = Math.PI / 2;
     rig.arms[side].shoulder.add(cuff);
-    const fore = mesh(new THREE.CylinderGeometry(0.068, 0.074, 0.17, 12, 1, true), dishMat, 0, -0.09, 0);
+    const fore = mesh(foldedCylinder(0.068, 0.074, 0.17, 24, 4, 8, 0.004), sleeveMat, 0, -0.09, 0);
     rig.arms[side].elbow.add(fore);
   }
   const ribbons = [];
