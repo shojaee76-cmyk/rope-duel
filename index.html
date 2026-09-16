@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>The Rope Duel | Live BTC/USDT</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23F7931A'/%3E%3Ctext x='16' y='23' font-size='18' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%237A4A08'%3EB%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="./chart.css">
 <link rel="preload" href="./fonts/unbounded-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="./fonts/unbounded-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="./fonts/space-grotesk-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
@@ -56,12 +55,11 @@
   /* ---------- shared entrance (one-shot, staggered) ---------- */
   @keyframes ui-in { from { opacity: 0; transform: translateY(14px); filter: blur(5px); }
     to { opacity: 1; transform: translateY(0); filter: blur(0); } }
-  #brand, #hud, #meter, #status, #chart-panel, #tag-buy, #tag-sell {
+  #brand, #hud, #meter, #status, #tag-buy, #tag-sell {
     animation: ui-in 0.7s var(--ease-out) backwards; }
   #brand { animation-delay: 0.05s; } #status { animation-delay: 0.12s; }
   #hud { animation-delay: 0.10s; } #meter { animation-delay: 0.18s; }
   #tag-sell { animation-delay: 0.26s; } #tag-buy { animation-delay: 0.26s; }
-  #chart-panel { animation-delay: 0.34s; }
 
   /* ---------- brand (top-left) ---------- */
   #brand { position: fixed; top: 14px; left: 18px; z-index: 12; pointer-events: none; }
@@ -336,7 +334,7 @@
     .plate { top: 42%; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #brand, #hud, #meter, #status, #chart-panel, #tag-buy, #tag-sell { animation: none; }
+    #brand, #hud, #meter, #status, #tag-buy, #tag-sell { animation: none; }
     #status-dot.live, #meter-duel.act i, .callout, .callout.whale::after { animation: none; }
     #meter-buy, #meter-sell, .plate-momentum i { transition-duration: 0.01s; }
   }
@@ -405,16 +403,6 @@
     <div class="plate-role">BUY PRESSURE</div>
     <div class="plate-momentum"><i id="mom-buy"></i></div>
     <div class="plate-state" id="state-buy">EN GARDE</div>
-  </div>
-</div>
-
-<div id="chart-panel" aria-label="live BTC/USDT 1-second candlestick chart">
-  <div id="chart-inner">
-    <div id="chart-head">
-      <span id="chart-title"><b>BTC/USDT</b> &middot; 1s CANDLES &middot; <span id="chart-venue">SPOT MARKET</span></span>
-      <span id="chart-chip" class="load"><span id="chart-chip-text">LOADING&hellip;</span></span>
-    </div>
-    <canvas id="chart-canvas"></canvas>
   </div>
 </div>
 

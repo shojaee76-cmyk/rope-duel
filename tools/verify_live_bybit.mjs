@@ -75,8 +75,8 @@ const s1 = await page.evaluate(() => {
   const f = window.__duelPage.feed, st = f.snap(), c = f.candles();
   return {
     statusText: (document.getElementById('status-mode') || {}).textContent,
-    venue: (document.getElementById('chart-venue') || {}).textContent,
-    chip: (document.getElementById('chart-chip-text') || {}).textContent,
+    venue: window.__duelPage.chart.stats().variant,     // the tape now lives in the sky panel
+    chip: window.__duelPage.chart.stats().chipText,
     hudPrice: (document.getElementById('price') || {}).textContent,
     provider: st.provider, providerLabel: st.providerLabel, endpoint: st.endpoint,
     mode: st.mode, feedStatus: st.status, pressure: st.pressure,
@@ -98,22 +98,15 @@ const s2 = await page.evaluate(async () => {
     if (p > pressureMax) pressureMax = p;
     await new Promise((r) => setTimeout(r, 500));
   }
-  const cv = document.getElementById('chart-canvas');
-  let painted = -1;
-  if (cv) {
-    try {
-      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-      let on = 0, n = 0;
-      for (let i = 0; i < d.length; i += 4) { n++; if (d[i + 3] > 8) on++; }
-      painted = Math.round(100 * on / n);
-    } catch (e) { painted = -2; }
-  }
+  // the tape is drawn into the sky panel now; its own stats() is the paint census
+  const sky = window.__duelPage.chart.stats();
+  const painted = sky.ink;
   const c2 = f.candles();
   return {
     count: c2.count, lastPrice: st.price, pressure: st.pressure, tpsMax, pressureMax, paintedPct: painted,
     tLast: c2.t.length ? c2.t[c2.t.length - 1] : -1, provider: st.provider,
     statusText: (document.getElementById('status-mode') || {}).textContent,
-    chip: (document.getElementById('chart-chip-text') || {}).textContent
+    chip: window.__duelPage.chart.stats().chipText
   };
 });
 
@@ -144,7 +137,7 @@ check('A: REST history seed applied', s1.seeded === true && s1.count >= 60, `see
 check('A: series is advancing (newest candle moved)', s2.tLast >= s1.tLast && s2.tLast > 0, `${s1.tLast} -> ${s2.tLast}`);
 check('A: order-flow pressure is non-zero (trades reach the duel)', s2.pressureMax > 0.001, 'peak|pressure|=' + s2.pressureMax.toFixed(4));
 check('A: trades/s > 0 over the sample window', s2.tpsMax > 0, 'tpsMax=' + s2.tpsMax);
-check('A: chart canvas actually painted', s2.paintedPct > 3, 'painted=' + s2.paintedPct + '%');
+check('A: sky tape panel actually painted', s2.paintedPct > 50, 'ink=' + s2.paintedPct + ' sampled px');
 
 /* =================== Scenario B: forced Bybit fallback =================== */
 console.log('\n=== Scenario B: Bybit-only feed (the geo-blocked-line path) ===');

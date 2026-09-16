@@ -9,7 +9,6 @@
 //              ?nofx=1               (reduce particles, for weak devices)
 import { createDuelScene } from './src/scene.js';
 import { wireFeedToScene } from './feed-adapter.js';
-import { createDuelChart } from './src/chart.js';
 
 const qs = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
@@ -37,7 +36,9 @@ const scene = createDuelScene($('duel-scene'), {
   // ?res=0.75 pins the render ratio; the quality governor handles the rest and
   // is disabled automatically when a ratio is pinned
   res: qs.get('res') ? Number(qs.get('res')) : undefined,
-  governor: qs.get('gov') !== 'off' && !qs.get('res')
+  governor: qs.get('gov') !== 'off' && !qs.get('res'),
+  // the tape is drawn into the sky now: ?sky=slab|aurora|stars picks the treatment
+  skyVariant: qs.get('sky') || 'slab'
 });
 
 /* ---------- HUD refs ---------- */
@@ -46,19 +47,17 @@ const meterBuy = $('meter-buy'), meterSell = $('meter-sell');
 const meterBuyPct = $('meter-buy-pct'), meterSellPct = $('meter-sell-pct');
 const meterDuelEl = $('meter-duel'), meterDuelTxt = $('meter-duel-text');
 const dotEl = $('status-dot'), modeEl = $('status-mode');
-const venueEl = $('chart-venue');   // chart header venue label (was hardcoded "BINANCE SPOT")
 const calloutLayer = $('callouts');
 const plates = {
   buy: { el: $('tag-buy'), state: $('state-buy'), mom: $('mom-buy'), last: '' },
   sell: { el: $('tag-sell'), state: $('state-sell'), mom: $('mom-sell'), last: '' }
 };
 
-/* ---------- embedded live chart (task t_189fb722) ----------
-   Panel markup lives in index.html (#chart-panel), styles in chart.css.
-   Fed below: handleState -> candle snapshots + price (~4 Hz, the feed's own
-   throttle), setStatus -> LIVE/RECONNECTING/SIM chip, spawnCallout -> dots
-   for callout-worthy trades ($50k+). */
-const chart = createDuelChart($('chart-panel'));
+/* ---------- the tape lives in the sky (scene.handleState feeds it) ----------
+   The candle chart is no longer a DOM panel: src/skychart.js draws it onto a
+   plane behind the arena (see scene.js). main.js still owns the data flow:
+   handleState -> candle snapshot + meta (~4 Hz), setStatus -> the sky chip. */
+const chart = scene.chart;
 
 function fmtUsd(v) {
   if (v == null || !isFinite(v)) return '—';
@@ -140,15 +139,10 @@ function setStatus(st) {
   const STATUS_TEXT = { open: 'LIVE', connecting: 'CONNECTING', backoff: 'RECONNECTING', stopped: 'OFFLINE' };
   const label = isDemo ? 'SIMULATION' : (STATUS_TEXT[st.status] || (st.status || '').toUpperCase());
   modeEl.textContent = label + src;
-  /* The chart header used to hardcode "BINANCE SPOT", which became a lie as
-   * soon as the feed could run on the Bybit fallback. Name the venue the data
-   * actually comes from, and stay neutral before the first status arrives. */
-  if (venueEl) {
-    venueEl.textContent = st.providerLabel
-      ? String(st.providerLabel).toUpperCase() + ' SPOT'
-      : (isDemo ? 'SIMULATED' : 'SPOT MARKET');
-  }
-  chart.notifyStatus(st); // chart chip mirrors the feed lifecycle instantly
+  /* The chart header used to hardcode "BINANCE SPOT" and then name the venue in
+   * a DOM label; the venue now lives in the sky panel's own chip, so there is
+   * nothing to patch here beyond keeping the two in sync through notifyStatus. */
+  chart.notifyStatus(st); // sky panel chip + stale wash
 }
 
 const unwire = wireFeedToScene(feed, scene, {

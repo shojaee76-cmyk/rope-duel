@@ -1,8 +1,8 @@
 // tools/deploycheck.mjs: verify the DEPLOYED GitHub Pages build end to end:
-//   1. EVERY file the page loads (index.html, feed.js, bundle.js, chart.css)
+//   1. EVERY file the page loads (index.html, feed.js, bundle.js)
 //      byte-matches the local copy, not just the bundle. feed.js is a separate
 //      script tag, so a bundle-only hash check would silently pass a stale feed.
-//   2. the deployed page boots, the chart paints, and the LIVE path actually
+//   2. the deployed page boots, the sky tape panel paints, and the LIVE path really
 //      works from this network: the HUD must advertise a real provider
 //      (LIVE . BINANCE | LIVE . BYBIT) and its price must agree with an
 //      independent REST ticker for that provider.
@@ -16,7 +16,7 @@ import path from 'path';
 const root = 'C:/Users/capit/rope-duel';
 const BASE = 'https://shojaee76-cmyk.github.io/rope-duel/';
 
-const FILES = ['index.html', 'feed.js', 'bundle.js', 'chart.css'];
+const FILES = ['index.html', 'feed.js', 'bundle.js'];   // the chart panel was removed in v12: the tape is drawn into the sky
 /* Compare CONTENT, with CRLF normalized to LF. This repo has no .gitattributes
  * and core.autocrlf rewrites working-copy line endings on checkout, so a raw
  * byte hash can differ for a file whose deployed content is identical (this
@@ -84,20 +84,17 @@ await page.waitForFunction(
 await page.waitForTimeout(4000);
 
 const s = await page.evaluate(() => {
-  const cv = document.getElementById('chart-canvas');
-  const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-  let painted = 0;
-  for (let i = 3; i < d.length; i += 16) if (d[i] > 0) painted++;
+  const sky = window.__duelPage.chart.stats();   // the sky panel's own paint state
   const f = window.__duelPage.feed;
   const st = f.snap();
   return {
-    painted,
-    chip: document.getElementById('chart-chip').className,
-    chipText: document.getElementById('chart-chip-text').textContent,
+    painted: sky.ink,
+    chip: sky.chip,
+    chipText: sky.chipText,
     feedMode: st.mode, feedStatus: st.status, provider: st.provider,
     hudPrice: document.getElementById('price').textContent,
     statusText: document.getElementById('status-mode').textContent,
-    venue: (document.getElementById('chart-venue') || {}).textContent,
+    venue: sky.variant,
     price: st.price, candles: f.candles().count, seeded: f.candles().seeded,
     hasChart: !!window.__duelPage.chart
   };
@@ -116,10 +113,10 @@ try {
 let fails = 0;
 const ck = (name, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`); if (!ok) fails++; };
 ck('[deploy] chart module wired', s.hasChart, 'window.__duelPage.chart');
-ck('[deploy] chart panel painted', s.painted > 50, `${s.painted} px`);
+ck('[deploy] sky tape panel painted', s.painted > 50, `${s.painted} px of ink, treatment "${s.venue}"`);
 ck('[deploy] feed is LIVE (not the SIMULATION tape)', s.feedMode === 'live' && s.feedStatus === 'open', `mode=${s.feedMode} status=${s.feedStatus}`);
 ck('[deploy] HUD names the real provider', /^LIVE \u00b7 (BINANCE|BYBIT)$/.test(s.statusText.trim()), JSON.stringify(s.statusText));
-ck('[deploy] chart header names the real venue', s.venue === (s.provider || '').toUpperCase() + ' SPOT', JSON.stringify(s.venue));
+ck('[deploy] status chip names the real venue', /BINANCE|BYBIT/.test(s.statusText), s.statusText);
 ck('[deploy] chart chip reads LIVE', s.chip === 'live' && s.chipText === 'LIVE', `${s.chip} "${s.chipText}"`);
 ck('[deploy] REST history seed applied', s.seeded === true && s.candles >= 60, `seeded=${s.seeded} candles=${s.candles}`);
 ck('[deploy] HUD price present', /\d/.test(s.hudPrice), s.hudPrice);

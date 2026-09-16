@@ -121,15 +121,12 @@ await page.goto('http://localhost:8994/?mode=live', { waitUntil: 'load' });
 await page.waitForTimeout(6000); // seed + ~5s of live stream
 
 const s1 = await page.evaluate(() => {
-  const cv = document.getElementById('chart-canvas');
-  const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-  let painted = 0;
-  for (let i = 3; i < d.length; i += 16) if (d[i] > 0) painted++;
+  const sky = window.__duelPage.chart.stats();   // the tape is drawn into the sky now
   const candles = window.__duelPage.feed.candles();
   return {
-    painted, candleCount: candles.count, seeded: candles.seeded,
-    chip: document.getElementById('chart-chip').className,
-    chipText: document.getElementById('chart-chip-text').textContent,
+    painted: sky.ink, candleCount: candles.count, seeded: candles.seeded,
+    chip: sky.chip,
+    chipText: sky.chipText,
     hudPrice: document.getElementById('price').textContent,
     feedStatus: window.__duelPage.feed.state().status,
   };
@@ -169,8 +166,8 @@ check('[mock-live] HUD price moves', s3.hud !== p1, `${p1} -> ${s3.hud}`);
 stopStream();
 await page.waitForTimeout(9500);
 const s4 = await page.evaluate(() => ({
-  chip: document.getElementById('chart-chip').className,
-  chipText: document.getElementById('chart-chip-text').textContent,
+  chip: window.__duelPage.chart.stats().chip,
+  chipText: window.__duelPage.chart.stats().chipText,
   feedStatus: window.__duelPage.feed.state().status }));
 check('[mock-live] stale indicator when stream freezes (socket still open)',
   s4.chip === 'stale' && s4.feedStatus === 'open', `${s4.chip} "${s4.chipText}" status=${s4.feedStatus}`);
@@ -179,8 +176,8 @@ await page.screenshot({ path: path.join(root, 'tools/shots/chart_mock_stale.png'
 startStream();
 await page.waitForTimeout(2500);
 const s5 = await page.evaluate(() => ({
-  chip: document.getElementById('chart-chip').className,
-  chipText: document.getElementById('chart-chip-text').textContent }));
+  chip: window.__duelPage.chart.stats().chip,
+  chipText: window.__duelPage.chart.stats().chipText }));
 check('[mock-live] chip returns to LIVE when stream resumes', s5.chip === 'live', `${s5.chip} "${s5.chipText}"`);
 
 check('[mock-live] zero page/console errors', errs.length === 0, errs.slice(0, 3).join(' | ') || 'clean');
@@ -190,10 +187,17 @@ for (const [w, h, tag] of [[390, 744, 'mobile390'], [320, 568, 'mobile320']]) {
   await page.setViewportSize({ width: w, height: h });
   await page.waitForTimeout(700);
   const box = await page.evaluate(() => {
-    const r = document.getElementById('chart-panel').getBoundingClientRect();
-    return { x: r.x, w: r.width, vw: innerWidth };
+    // the tape panel is 3D now: assert it is still framed and still carries ink
+    const d = window.__duelDebug, cam = d.camera, sky = d.skyChart, el = d.renderer.domElement;
+    const g = sky.mesh.geometry.parameters, ndc = [];
+    for (const [sx, sy] of [[-1, 1], [1, -1]]) {
+      const p = sky.mesh.position.clone();
+      p.x += sx * g.width / 2; p.y += sy * g.height / 2; p.project(cam);
+      ndc.push([+p.x.toFixed(2), +p.y.toFixed(2)]);
+    }
+    return { x: Math.min(...ndc.map((n) => n[0])), r: Math.max(...ndc.map((n) => n[0])), ink: sky.stats().ink, vw: innerWidth };
   });
-  check(`[mock-live] panel fits ${tag}`, box.x >= -1 && box.x + box.w <= box.vw + 1, JSON.stringify(box));
+  check(`[mock-live] sky panel framed + painted at ${tag}`, box.x >= -1.15 && box.r <= 1.15 && box.ink > 50, JSON.stringify(box));
   await page.screenshot({ path: path.join(root, `tools/shots/chart_mock_${tag}.png`) });
 }
 

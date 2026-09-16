@@ -66,12 +66,13 @@ const boot = await page.evaluate(async () => {
       unbounded900: document.fonts.check('900 21px Unbounded'),
       grotesk700: document.fonts.check('700 13px "Space Grotesk"'),
     },
-    entranceDone: ['hud', 'meter', 'tag-buy', 'tag-sell', 'chart-panel'].map((id) => ({
+    entranceDone: ['hud', 'meter', 'tag-buy', 'tag-sell'].map((id) => ({
       id, opacity: cs(document.getElementById(id)).opacity,
       anim: cs(document.getElementById(id)).animationName,
     })),
     els: {
-      hud: vis('hud'), meter: vis('meter'), chartPanel: vis('chart-panel'),
+      hud: vis('hud'), meter: vis('meter'),
+      skyChart: (() => { const s = window.__duelPage.chart.stats(); return { ink: s.ink, candles: s.candles, variant: s.variant, visible: s.ink > 50 }; })(),
       tagBuy: vis('tag-buy'), tagSell: vis('tag-sell'), status: vis('status'),
       brand: vis('brand'), duelPill: vis('meter-duel'),
     },
@@ -151,7 +152,7 @@ for (const [w, h, tag] of viewports) {
   await page.setViewportSize({ width: w, height: h });
   await page.waitForTimeout(650);
   const fit = await page.evaluate(() => {
-    const ids = ['hud', 'meter', 'chart-panel', 'tag-buy', 'tag-sell', 'status'];
+    const ids = ['hud', 'meter', 'tag-buy', 'tag-sell', 'status'];
     const out = { overflowX: document.documentElement.scrollWidth - innerWidth, boxes: {} };
     for (const id of ids) {
       const r = document.getElementById(id).getBoundingClientRect();
@@ -161,7 +162,7 @@ for (const [w, h, tag] of viewports) {
     return out;
   });
   check(`[fit] ${tag} no overflow + panels in viewport`, fit.overflowX <= 0 && !fit.bad,
-    `overflow=${fit.overflowX}px ${fit.bad ? 'bad=' + fit.bad : ''} ${JSON.stringify(fit.boxes.chartPanel)}`);
+    `overflow=${fit.overflowX}px ${fit.bad ? 'bad=' + fit.bad : ''}`);
   await page.screenshot({ path: `tools/shots/ui_fit_${tag}.png` });
 }
 

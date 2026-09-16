@@ -19,6 +19,7 @@ import { Crowd } from './crowd.js';
 import { FightDirector } from './director.js';
 import { buildSkyDome, buildStars, buildClouds, buildShootingStars } from './skydome.js';
 import { buildSkyline, buildFireflies, buildFountainWater, buildEmberDrift } from './ambience.js';
+import { createSkyChart } from './skychart.js';
 import { setMaxAnisotropy } from './tex.js';
 
 export function createDuelScene(container, opts = {}) {
@@ -106,6 +107,15 @@ export function createDuelScene(container, opts = {}) {
     amb.embers = buildEmberDrift(scene, amb.vfxScale);
   }
   buildSkyline(scene);
+  /* The live tape, in the sky. The candle chart used to be a DOM panel pinned to
+   * the bottom of the screen; the duel is fed by that tape, so it is drawn into
+   * the world instead: one wide light panel high behind the arena, above the wall
+   * and the cats (?sky=slab|aurora|stars picks the treatment). */
+  const skyChart = createSkyChart(scene, camera, {
+    variant: opts.skyVariant || 'slab',
+    renderer,
+    anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
+  });
   function onMouse(e) {
     const w = container.clientWidth || innerWidth, h = container.clientHeight || innerHeight;
     amb.mouseT.x = ((e.clientX ?? w / 2) / w) * 2 - 1;
@@ -239,6 +249,9 @@ export function createDuelScene(container, opts = {}) {
       flag.setChange24h(THREE.MathUtils.clamp(director.trendM() * 8, -99, 99));
     },
     setChange24hText(text) { flag.setChange24hText(text); },
+    /* the sky chart is the tape display now: main.js feeds it the candle store
+     * snapshot + the feed state, exactly the calls the DOM panel used to get */
+    chart: skyChart,
     onTradeCallout(cb) { hooksTrade.push(cb); return () => { const i = hooksTrade.indexOf(cb); if (i >= 0) hooksTrade.splice(i, 1); }; },
     tradeCallout(info) {
       if (info && info.notional >= 250000) { amb.moonPulse = 1; heat = Math.min(1, heat + 0.35); }
@@ -530,7 +543,7 @@ export function createDuelScene(container, opts = {}) {
   // debug/integration handle (used by tests and the root webpage task)
   if (opts.debug) {
     window.__duelDebug = {
-      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, gov, contact,
+      rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, gov, contact, skyChart,
       quality: () => ({ ratio: gov.ratio, base: gov.base, step: gov.step, med: gov.med, changes: gov.changes, on: gov.on, fails: gov.fails, lock: gov.lock }),
       heat: () => heat,
       freeze: (armed, ax = 1.1, bx = -1.1) => {
