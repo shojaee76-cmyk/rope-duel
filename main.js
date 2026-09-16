@@ -158,7 +158,9 @@ const FIGHT_LABELS = {
   STUMBLE: 'STAGGERS!', BLADE_LOCK: 'BLADE LOCK', CLASH: 'CLASH!',
   FREEZE: 'EN GARDE', TAUNT: 'TAUNTS!', RIPOSTE: 'RIPOSTE!', PARRY_HOP: 'PARRY!',
   /* v14 technique labels: the new moves read as technique, not as noise */
-  THRUST: 'THRUST!', FEINT: 'FEINT!', PARRY_BEAT: 'BEAT!'
+  THRUST: 'THRUST!', FEINT: 'FEINT!', PARRY_BEAT: 'BEAT!',
+  /* v18: the seated sword guard is a held posture, not a strike */
+  SIT_GUARD: 'HOLDS GUARD'
 };
 function actFor(name) {
   if (name === 'LUNGE' || name === 'RUSH' || name === 'RIPOSTE' || name === 'THRUST') return 'lunge';
@@ -229,7 +231,7 @@ setInterval(() => {
     const d = window.__duelDebug;
     if (!d || !d.catA || !d.catB) return;
     const an = d.catA.state.name, bn = d.catB.state.name;
-    // catA = Don Gato (BUY, right), catB = Sultan Bigotes (SELL, left)
+    // catA = Sultan Bigotes (BUY, right), catB = Don Gato (SELL, left) - v18
     setFighter('buy', d.catA.state); setFighter('sell', d.catB.state);
     const key = an + '|' + bn;
     if (key === lastDuelKey) return;

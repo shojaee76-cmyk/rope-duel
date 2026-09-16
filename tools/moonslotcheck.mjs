@@ -1,9 +1,12 @@
-// tools/moonslotcheck.mjs - does the v15 moon slot stay clear of the sky chart
-// panel and the DOM HUD, across the FULL real camera pan range, on desktop and
+// tools/moonslotcheck.mjs - does the v15 moon slot stay clear of the wall tape
+// board and the DOM HUD, across the FULL real camera pan range, on desktop and
 // phone viewports?
 // Pass criteria:
 //   1. moon disc (its opaque core, texture disc r=1.855 of 5.0-plane scale 1)
-//      never intersects the chart band in screen fractions
+//      never intersects the wall board in screen fractions AT MODERATE PANS
+//      (|pan| <= 5.0). At the extreme clamp the board legitimately slides in
+//      front of the moon (the moon is behind the wall; real occlusion), so
+//      extreme pans are reported but not failed.
 //   2. moon core never overlaps #meter (DOM) or the fighter plates
 //   3. moon core stays fully on-screen (some halo may bleed, that is fine)
 import { chromium } from 'playwright-core';
@@ -65,9 +68,6 @@ for (const vp of [{ width: 1280, height: 800, tag: 'wide' }, { width: 390, heigh
     const cam = d.camera;
     const moon = d.arena.userData.moon;
     const vw = innerWidth, vh = innerHeight;
-    const CHART = vw < 700
-      ? { l: 0.045, r: 0.955, t: 0.175, b: 0.30 }
-      : { l: 0.672, r: 0.985, t: 0.104, b: 0.348 };
     const CORE_R = 1.855 / 2.5;
     const dom = {};
     for (const [k, sel] of Object.entries({ meter: '#meter', sell: '#tag-sell', buy: '#tag-buy' })) {
@@ -91,6 +91,9 @@ for (const vp of [{ width: 1280, height: 800, tag: 'wide' }, { width: 390, heigh
       cam.lookAt(pan * 0.9, 3.15, 0);
       await nextFrame(); await nextFrame();
       cam.updateMatrixWorld(true);
+      // v18: the board's LIVE screen rect, projected at THIS camera by the
+      // chart module itself (world-fixed board, so it moves with the pan)
+      const scr = window.__duelPage.chart.stats().screen;
       const c = moon.position.clone().project(cam);
       const edge2 = moon.position.clone(); edge2.x += 1.855 * moon.scale.x;
       const e2 = edge2.project(cam);
@@ -103,7 +106,8 @@ for (const vp of [{ width: 1280, height: 800, tag: 'wide' }, { width: 390, heigh
       out.push({
         pan: +pan.toFixed(1),
         cx: +cx.toFixed(3), cyTop: +cyTop.toFixed(3), halfX: +halfX.toFixed(3), halfY: +halfY.toFixed(3),
-        chartHit: (cx + halfX > CHART.l && cx - halfX < CHART.r && cyTop + halfY > CHART.t && cyTop - halfY < CHART.b),
+        board: scr,
+        chartHit: (cx + halfX > scr.l && cx - halfX < scr.r && cyTop + halfY > scr.t && cyTop - halfY < scr.b),
         meterHit: dom.meter && (cx + halfX > dom.meter.l && cx - halfX < dom.meter.r && cyTop + halfY > dom.meter.t && cyTop - halfY < dom.meter.b),
         bleedTop: +bleedTop.toFixed(3),
         dom
@@ -111,7 +115,7 @@ for (const vp of [{ width: 1280, height: 800, tag: 'wide' }, { width: 390, heigh
     }
     return out;
   });
-  const bad = checked.filter(r => r.chartHit || r.bleedTop > 0.10);
+  const bad = checked.filter(r => (r.chartHit && Math.abs(r.pan) <= 5.0) || r.bleedTop > 0.10);
   console.log(`\n== ${vp.tag} (${vp.width}x${vp.height}) ==`);
   console.log('  dom:', JSON.stringify(checked[0].dom));
   for (const r of checked) {

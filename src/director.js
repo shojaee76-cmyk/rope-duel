@@ -40,27 +40,34 @@ const MOVES = {
   PARRY_HOP:  { cat: 'B', len: 0.45, cool: 1.9, prio: 1 }, // Zellij Sidestep
   PARRY_BEAT: { cat: 'B', len: 0.4,  cool: 1.5, prio: 1 }, // v14: the beat
   SLASH_SPIN: { cat: 'B', len: 0.6,  cool: 2.4, prio: 1 }, // Moorish Windmill
-  RIPOSTE:    { cat: 'B', len: 0.6,  cool: 2.2, prio: 2 }  // Crescent Riposte
+  RIPOSTE:    { cat: 'B', len: 0.6,  cool: 2.2, prio: 2 }, // Crescent Riposte
+  // v18: the seated guard - a POSTURE, not a strike. Long duration; the
+  // director renews it while the tape stays against this cat.
+  SIT_GUARD:  { cat: 'A', len: 3.4,  cool: 0,   prio: 0 }
 };
 const OFFENSIVE = new Set(['RUSH', 'LUNGE', 'THRUST', 'SLASH_UP', 'SLASH_SPIN', 'RIPOSTE', 'TAUNT']);
 const DEFENSIVE = new Set(['PARRY_HOP', 'PARRY_BEAT', 'RIPOSTE', 'RECOVER']);
-const A_POOL = ['LUNGE', 'THRUST', 'THRUST', 'SLASH_UP', 'FEINT'];
-const B_POOL = ['SLASH_SPIN', 'PARRY_BEAT', 'RIPOSTE', 'PARRY_HOP'];
+// v18 ROLE POOLS (user: "if the pressure is sell, make the sell cat attack and
+// the buy cat sit down and defend with his sword"): the pressure side attacks,
+// the other side defends. Both cats know every MOVE; the pools are what assign
+// behaviour, and they are now chosen by PRESSURE SIGN, not by side.
+const ATTACK_POOL = ['LUNGE', 'THRUST', 'THRUST', 'SLASH_UP', 'FEINT'];
+const GUARD_POOL = ['PARRY_BEAT', 'PARRY_HOP'];
 
 // v14 technique grammar: the reply MATCHES the technique instead of a coin
-// flip. Measured in real fencing and in the fight logs both: a wide charge is
-// answered with distance (sidestep), a point attack with a beat, a showy
-// attack with a parry. The old code answered everything with one of two moves
-// at random, which is why long exchanges never built a phrase.
+// flip. v18 ROLE RULE: the reply is now always DEFENSIVE - the pressure side
+// attacks, the other side answers with parries and beats. (The old table let
+// the defender counter-lunge, which broke the role rule.) Both entries name
+// the same move for either side because both cats know every move.
 const REACTION = {
-  RUSH:       { B: 'PARRY_HOP',  A: 'LUNGE' },     // charge  -> give ground / slide in under it
-  LUNGE:      { B: 'PARRY_HOP',  A: 'LUNGE' },     // lunge   -> hop away / counter-lunge
-  THRUST:     { B: 'PARRY_BEAT', A: 'LUNGE' },     // point   -> beat it aside
-  SLASH_UP:   { B: 'PARRY_BEAT', A: 'LUNGE' },     // big cut -> beat / stop-hit
-  FEINT:      { B: 'PARRY_BEAT', A: 'LUNGE' },     // the bait is beaten -> riposte threat
-  SLASH_SPIN: { A: 'LUNGE',      B: 'PARRY_HOP' }, // windmill -> stop-hit through it
-  RIPOSTE:    { A: 'LUNGE',      B: 'PARRY_HOP' },
-  TAUNT:      { A: 'LUNGE',      B: 'PARRY_HOP' }
+  RUSH:       { B: 'PARRY_HOP',  A: 'PARRY_HOP' },  // charge  -> give ground
+  LUNGE:      { B: 'PARRY_HOP',  A: 'PARRY_BEAT' }, // lunge   -> hop / beat it wide
+  THRUST:     { B: 'PARRY_BEAT', A: 'PARRY_BEAT' }, // point   -> beat it aside
+  SLASH_UP:   { B: 'PARRY_BEAT', A: 'PARRY_HOP' },  // big cut -> beat / slide
+  FEINT:      { B: 'PARRY_BEAT', A: 'PARRY_HOP' },  // the bait is beaten
+  SLASH_SPIN: { A: 'PARRY_BEAT', B: 'PARRY_HOP' },  // windmill -> stop it wide
+  RIPOSTE:    { A: 'PARRY_BEAT', B: 'PARRY_HOP' },
+  TAUNT:      { A: 'PARRY_BEAT', B: 'PARRY_HOP' }
 };
 
 // v14 combos: a move can CHAIN into its follow-up the moment its window opens.
@@ -199,7 +206,7 @@ export class FightDirector {
     // binary "is either cat locked" flag the scene used to chase
     const W = { BLADE_LOCK: 1, CLASH: 0.85, HIT: 0.7, LUNGE: 0.62, RUSH: 0.62, THRUST: 0.55,
       RIPOSTE: 0.55, STUMBLE: 0.5, FEINT: 0.3, PARRY_BEAT: 0.35, TAUNT: 0.32,
-      RECOVER: 0.24, PARRY_HOP: 0.18, IDLE: 0.08, FREEZE: 0.05 };
+      RECOVER: 0.24, PARRY_HOP: 0.18, SIT_GUARD: 0.15, IDLE: 0.08, FREEZE: 0.05 };
     const want = Math.max(W[A.state.name] === undefined ? 0.12 : W[A.state.name],
                           W[B.state.name] === undefined ? 0.12 : W[B.state.name]);
     this.intensity += (want - this.intensity) * Math.min(1, dt / 0.7);
@@ -240,7 +247,30 @@ export class FightDirector {
     if (!this.frozen && !this.stumbling) this._checkTriggers();
     // tempo clock: never let the duel go quiet
     if (!this.frozen && !this.stumbling && this.now > this.busyUntil) this._tempoTick();
+    // v18: keep the losing side seated in his sword guard while the tape
+    // stays against him (see _maintainGuard)
+    if (!this.frozen && !this.stumbling) this._maintainGuard();
     this._events.length = 0;
+  }
+
+  // ---- v18 THE SEATED GUARD (user: "the buy cat to sit down and defend with
+  // his sword") ----
+  // When the tape leans against a cat (|pS| >= 0.10) and he is not mid-move,
+  // he drops into SIT_GUARD: crouched seat on the rope, sword held up in a
+  // closed guard. The director RENEWS the posture while the lean persists (a
+  // posture, not a one-shot), and releases him when the tape loosens past
+  // 0.05, when the pair breaks apart, or when the roles flip.
+  _maintainGuard() {
+    const P = this.pS;
+    const defSide = P >= 0 ? 'B' : 'A';          // the side the tape leans ON
+    const cat = this.cats[defSide];
+    const st = cat.state.name;
+    const committed = Math.abs(P) >= 0.10;
+    const held = st === 'SIT_GUARD';
+    if (!committed || held) return;
+    if (this.gap > 2.6) return;                  // too far apart to be pinned
+    if (!this._canMove(defSide, 'SIT_GUARD')) return;
+    this._start(defSide, 'SIT_GUARD', { dir: this._fw(defSide) }, 'guard');
   }
 
   // circle -> engage -> break, with the gap as a driven quantity
@@ -330,27 +360,26 @@ export class FightDirector {
     if (this._slotAt === undefined) this._slotAt = this.now + 0.25;
     if (this.now < this._slotAt) return;
     this._slotAt = this.now + tempo * (0.9 + Math.random() * 0.2);
+    // ---- v18 ROLE ASSIGNMENT (user: "if the pressure is sell, make the sell
+    // cat attack and the buy cat sit down and defend with his sword") ----
+    // pressure > 0 = BUY side attacks, SELL side defends; pressure < 0 = the
+    // reverse. Dead tape (|pS| < 0.05) = neither committed: both circle, only
+    // light probes (LUNGE/FEINT) are allowed, no heavy slashes.
     const P = this.pS;
-    // the side with pressure initiative presses harder
-    const wantA = P >= 0 ? Math.random() < (0.5 + Math.min(0.35, Math.abs(P) * 0.5)) : Math.random() < 0.35;
-    const first = wantA ? 'A' : 'B';
-    const second = wantA ? 'B' : 'A';
-    const closeRange = this.gap < 1.5;
-    for (const side of [first, second]) {
-      const pool = side === 'A' ? A_POOL : B_POOL;
-      // in close range prefer the quick strikes, at range prefer charges
-      const pick = closeRange
-        ? pool.filter((m) => m !== 'TAUNT')
-        : pool;
-      for (const mv of this._ordered(pick)) {
-        if (this._canMove(side, mv)) { this._start(side, mv, { dir: this._fw(side) }, 'tempo'); return; }
-      }
+    const dead = Math.abs(P) < 0.05;
+    const atkSide = P >= 0 ? 'A' : 'B';          // A = BUY, B = SELL
+    const defSide = atkSide === 'A' ? 'B' : 'A';
+    const probeOnly = dead;
+    let pool = probeOnly ? ['LUNGE', 'FEINT'] : ATTACK_POOL;
+    // the ATTACKER moves first; the defender answers from the REACTION table
+    // (below, in _start) or sits into the guard while the tape stays against it
+    for (const mv of this._ordered(pool)) {
+      if (this._canMove(atkSide, mv)) { this._start(atkSide, mv, { dir: this._fw(atkSide) }, 'tempo'); return; }
     }
-    // both busy: try the defensive/repositioning option
-    for (const side of ['A', 'B']) {
-      for (const mv of side === 'A' ? ['TAUNT'] : ['PARRY_HOP']) {
-        if (this._canMove(side, mv)) { this._start(side, mv, { dir: this._fw(side) }, 'tempo'); return; }
-      }
+    // attacker fully committed: the defender keeps his feet moving (a parry
+    // hop), which reads as a fighter working on the back foot
+    for (const mv of ['PARRY_HOP', 'PARRY_BEAT']) {
+      if (this._canMove(defSide, mv)) { this._start(defSide, mv, { dir: this._fw(defSide) }, 'tempo'); return; }
     }
   }
 
@@ -430,7 +459,11 @@ export class FightDirector {
 
   _canMove(side, move) {
     const now = this.now;
-    if (this.active[side]) return false;
+    // v18: a SEATED guard can still be interrupted by his own parries - the
+    // sword stays up while seated, so an incoming attack he can answer must
+    // lift him out of the posture (the director re-seats him afterwards).
+    if (this.active[side] &&
+        !(this.active[side] === 'SIT_GUARD' && (move === 'PARRY_HOP' || move === 'PARRY_BEAT'))) return false;
     if ((this.cools[move] || 0) > now) return false;
     if (this.sideCool[side] > now) return false;
     if (now < this.busyUntil) return false;
@@ -450,6 +483,16 @@ export class FightDirector {
         (this._badMoves = this._badMoves || []).push({ t: +this.now.toFixed(2), side, move: String(move) });
       }
       return false;
+    }
+    // v18: the role rule - only the pressure side may START an offensive move.
+    // (Defensive moves and the SIT_GUARD posture are open to everyone.) Two
+    // sanctioned exceptions: the attacker's own COMBO chains (chain:true is
+    // only ever created by _start for the moving side, and the gate below
+    // still requires that side to hold the attack role), and the post-lock
+    // winner follow-up, which passes reason='winner'.
+    if (OFFENSIVE.has(move)) {
+      const atkSide = this.pS >= 0 ? 'A' : 'B';
+      if (side !== atkSide && reason !== 'winner') return false;
     }
     this.log.push({ t: +this.now.toFixed(2), side, move, reason });
     if (this.log.length > 400) this.log.shift();
@@ -538,7 +581,9 @@ export class FightDirector {
     // always-lock rule kept the cats welded together for ~43% of all frames.
     if (this.now < this.lockCool) return false;
     const defMove = foe.state.name;
-    const canParry = DEFENSIVE.has(defMove) || OFFENSIVE.has(defMove);
+    // v18: a seated guard still counts as a guard - the sword is up, so a
+    // locked exchange is legal against the posture
+    const canParry = DEFENSIVE.has(defMove) || defMove === 'SIT_GUARD' || OFFENSIVE.has(defMove);
     const near = this.gap < 1.75;
     if (!near) return false;
     // The odds are the original ones (they produced a lock every ~6 s, and my first
@@ -593,13 +638,14 @@ export class FightDirector {
       this.phaseDur = 0.5 + Math.random() * 0.5;
       this.gapTarget = 2.1 + Math.random() * 0.7;
       // follow-up: the winner gets an immediate extra attack (momentum).
-      // v14: rotated instead of always the same move - pressure plays a
-      // different card each time it wins the exchange.
+      // v18: the follow-up comes from the ATTACK pool regardless of side - the
+      // winner of the exchange pressed the advantage, the loser does not get
+      // a free counter, the REACTION table (always defensive now) still owns
+      // the answer.
       this._after(0.05, () => {
-        const mv = (winner === 'A')
-          ? (['RUSH', 'THRUST', 'SLASH_UP'][Math.floor(Math.random() * 3)])
-          : (['SLASH_SPIN', 'RIPOSTE', 'LUNGE'][Math.floor(Math.random() * 3)]);
-        if (this._canMove(winner, mv)) this._start(winner, mv, { dir: this._fw(winner) });
+        const pool = ['LUNGE', 'THRUST', 'SLASH_UP', 'SLASH_SPIN', 'RIPOSTE'];
+        const mv = pool[Math.floor(Math.random() * pool.length)];
+        if (this._canMove(winner, mv)) this._start(winner, mv, { dir: this._fw(winner) }, 'winner');
       });
     });
   }

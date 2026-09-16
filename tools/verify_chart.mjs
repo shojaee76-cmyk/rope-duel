@@ -1,9 +1,11 @@
-// tools/verify_chart.mjs — acceptance probe for the LIVE TAPE IN THE SKY.
-// The chart used to be a DOM panel (t_189fb722); it is now drawn into the duel's
-// night sky (src/skychart.js). This asserts the things that can actually break:
-// the texture carries ink, the tape grows and repaints, the chip mirrors the feed
-// lifecycle, the panel is inside the camera frustum, and it sits BEHIND the cats
-// and ABOVE the wall so it never fights the duel for the frame.
+// tools/verify_chart.mjs — acceptance probe for the LIVE TAPE ON THE WALL.
+// The chart used to be a DOM panel (t_189fb722), then a sky panel (v12); since
+// v18 it is drawn onto a plane mounted on the arena's back wall (src/
+// skychart.js), inside the walnut tape board. This asserts the things that can
+// actually break: the texture carries ink, the tape grows and repaints, the
+// chip mirrors the feed lifecycle, the board is inside the camera frustum, and
+// it sits ON the wall (z near the wall plane, y in the wall band) so it reads
+// as part of the architecture.
 import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import http from 'http';
@@ -62,16 +64,10 @@ const readSky = () => {
     }
     return out;
   })();
-  const panelL = Math.min(...corners.map((c) => c.x)), panelR = Math.max(...corners.map((c) => c.x));
-  const hatsInPanelX = hudHead.filter((h) => h.x > panelL - 0.01 && h.x < panelR + 0.01).map((h) => h.y);
   return {
-    stats: st, corners, hudHead,
-    inFrame: corners.every((c) => Math.abs(c.ndc[0]) <= 1.15 && Math.abs(c.ndc[1]) <= 1.15),
-    panelBottom: Math.max(...corners.map((c) => c.y)),
-    panelL, panelR,
-    // the nearest hat that shares the panel's columns: the panel must sit above it
-    hatTop: hatsInPanelX.length ? Math.min(...hatsInPanelX) : 1,
-    hatsInPanelX: hatsInPanelX.length,
+    stats: st, hudHead,
+    inFrame: (() => { const s = st.screen; return s.l >= -0.35 && s.r <= 1.35 && s.t >= -0.35 && s.b <= 1.35; })(),
+    screen: st.screen,
     z: st.position[2], y: st.position[1], variant: st.variant,
     candles: window.__duelPage.feed.candles(),
     feedState: window.__duelPage.feed.state(),
@@ -88,17 +84,15 @@ async function probe(mode, vp, tag, waitMs) {
   await page.waitForTimeout(waitMs);
   const state = await page.evaluate(readSky);
   check(`[${tag}] sky chart exists (${state.variant} treatment)`, !!state.stats, JSON.stringify(state.stats.plane));
-  check(`[${tag}] sky texture carries ink (>50 sampled px)`, state.stats.ink > 50, `${state.stats.ink} px, ${state.stats.draws} draws`);
+  check(`[${tag}] board texture carries ink (>50 sampled px)`, state.stats.ink > 50, `${state.stats.ink} px, ${state.stats.draws} draws`);
   check(`[${tag}] chip reflects the feed`,
     ['live', 'demo', 'stale', 'off', 'load'].includes(state.stats.chip),
     `${state.stats.chip} "${state.stats.chipText}"`);
-  check(`[${tag}] panel is inside the camera frame`, state.inFrame,
-    `corners ${JSON.stringify(state.corners.map((c) => c.ndc))}`);
-  check(`[${tag}] panel sits behind the duel (z=${state.z}) and above the wall (y=${state.y})`,
-    state.z <= -18 && state.y >= 8, `z=${state.z} y=${state.y}`);
-  check(`[${tag}] panel bottom (${state.panelBottom.toFixed(2)}) stays above the cats' hats (${state.hatTop === 1 ? 'none in its columns' : state.hatTop.toFixed(2)})`,
-    state.panelBottom < state.hatTop - 0.01,
-    `${state.hatsInPanelX} hat(s) share the panel's columns`);
+  check(`[${tag}] board is inside the camera frame`, state.inFrame,
+    `screen ${JSON.stringify(state.screen)}`);
+  check(`[${tag}] board is ON the wall (z=${state.z}, y=${state.y})`,
+    state.z <= -6.3 && state.z >= -7.6 && state.y >= 1.4 && state.y <= 4.6,
+    `z=${state.z} y=${state.y}`);
   check(`[${tag}] zero page errors`, errs.length === 0, errs.slice(0, 3).join(' | ') || 'clean');
   await page.screenshot({ path: path.join(root, `tools/shots/chart_${tag}.png`) });
   await page.close();
@@ -123,8 +117,10 @@ await page.close();
 await probe('demo', { width: 390, height: 744 }, 'sky_demo_mobile390', 2500);
 await probe('demo', { width: 320, height: 568 }, 'sky_demo_mobile320', 2500);
 
-/* run 2: live mode (real socket + REST seed) */
-const live = await probe('live', { width: 1280, height: 800 }, 'sky_live_desktop', 9000);
+/* run 2: live mode (real socket + REST seed). The wait is generous: on a slow
+ * TLS day the first WS handshake alone can take 5-6 s (measured), and a timed
+ * out attempt rotates through backoff before the next endpoint answers. */
+const live = await probe('live', { width: 1280, height: 800 }, 'sky_live_desktop', 25000);
 check('[live] feed reached OPEN', live.feedState.status === 'open', `status=${live.feedState.status} err=${live.feedState.lastError}`);
 check('[live] candle store seeded from REST', live.candles.seeded, `count=${live.candles.count}`);
 check('[live] deep history available (>=100 candles)', live.candles.count >= 100, `${live.candles.count} candles`);

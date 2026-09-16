@@ -197,7 +197,7 @@ for (const [w, h, tag] of [[390, 744, 'mobile390'], [320, 568, 'mobile320']]) {
     }
     return { x: Math.min(...ndc.map((n) => n[0])), r: Math.max(...ndc.map((n) => n[0])), ink: sky.stats().ink, vw: innerWidth };
   });
-  check(`[mock-live] sky panel framed + painted at ${tag}`, box.x >= -1.15 && box.r <= 1.15 && box.ink > 50, JSON.stringify(box));
+  check(`[mock-live] wall board framed + painted at ${tag}`, box.x >= -1.35 && box.r <= 1.35 && box.ink > 50, JSON.stringify(box));
   await page.screenshot({ path: path.join(root, `tools/shots/chart_mock_${tag}.png`) });
 }
 

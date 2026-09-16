@@ -270,11 +270,12 @@ function buildCape() {
   return cape;
 }
 
-// ---------- CAT A: DON GATO (BUY side, RIGHT pole; local +x = facing; root yaw = PI -> faces world -x) ----------
-// CONVENTION (task t_167a53f3): BUY = GREEN. Don Gato keeps his gold armour
-// neutrals; every cloth piece (cape, plume, tabard, slashed doublet) now pulls
-// the BUY green family via CAT_A.crimsonMain/crimsonDeep aliases in palette.js
-// (names kept so the material slots stay stable; the HUES are green now).
+// ---------- CAT B: DON GATO (SELL side, LEFT pole; faces world +x) ----------
+// CONVENTION (task t_167a53f3): SELL = RED. v18 IDENTITY (user directive): the
+// SPANISH knight is the SELL side. Don Gato keeps his gold armour neutrals;
+// every cloth piece (cape, plume, tabard, slashed doublet) pulls the SELL red
+// family via CAT_A.crimsonMain/crimsonDeep aliases in palette.js (names kept so
+// the material slots stay stable; the HUES are red).
 export function buildDonGato() {
   const rig = buildRig({
     // white Andalusian cat, warm cream patches over the coat
@@ -436,22 +437,23 @@ export function buildDonGato() {
   }
   rig.tail[5].add(mesh(torus(0.042, 0.012), MA.gold, 0, -0.1, 0));
 
-  // rapier in the camera-side arm (L: local -z -> world +z after yaw PI)
+  // rapier in the camera-side arm (R: local +z = world +z, facing 0)
   const rapier = buildRapier();
   rapier.position.set(0, -0.21, 0);
-  rig.arms.L.elbow.add(rapier);
+  rig.arms.R.elbow.add(rapier);
 
   return {
-    ...rig, name: 'DON GATO', side: 'A', facing: Math.PI,
-    sword: rapier, swordArm: 'L', cape, crossMat: MA.cross, plume
+    ...rig, name: 'DON GATO', side: 'B', facing: 0,
+    sword: rapier, swordArm: 'R', cape, crossMat: MA.cross, plume
   };
 }
 
-// ---------- CAT B: SULTAN BIGOTES (SELL side, LEFT pole; faces world +x) ----------
-// CONVENTION (task t_167a53f3): SELL = RED. Sultan keeps his silver/white
-// neutrals (turban, dishdashah body, belt); every trim piece (turban band,
-// placket, cuffs, hem, scimitar grip) now pulls the SELL red family via the
-// CAT_B.emerald* aliases in palette.js; his eyes go red, his gem a ruby.
+// ---------- CAT A: SULTAN BIGOTES (BUY side, RIGHT pole; local +x = facing; root yaw = PI -> faces world -x) ----------
+// CONVENTION (task t_167a53f3): BUY = GREEN. v18 IDENTITY (user directive): the
+// MOSLEM cat is the BUY side. Sultan keeps his silver/white neutrals (turban,
+// dishdashah body, belt); every trim piece (turban band, placket, cuffs, hem,
+// scimitar grip) pulls the BUY green family via the CAT_B.emerald* aliases in
+// palette.js; his eyes go green, his gem an emerald.
 export function buildSultanBigotes() {
   const rig = buildRig({
     // silver tabby: the material carries the LIGHT silver and the map darkens
@@ -556,17 +558,18 @@ export function buildSultanBigotes() {
   }
   const ribbons = [];
 
-  // silver vambrace on the sword forearm
-  rig.arms.R.elbow.add(mesh(cyl(0.055, 0.05, 0.11, 10), MB.silver, 0, -0.1, 0));
+  // silver vambrace on the sword forearm (L is the camera-side arm for the
+  // BUY/right-pole side: local -z -> world +z after the yaw-PI flip)
+  rig.arms.L.elbow.add(mesh(cyl(0.055, 0.05, 0.11, 10), MB.silver, 0, -0.1, 0));
 
-  // scimitar in the camera-side arm (R: local +z = world +z, facing 0)
+  // scimitar in the camera-side arm (L: local -z -> world +z after yaw PI)
   const scim = buildScimitar();
   scim.position.set(0, -0.21, 0);
-  rig.arms.R.elbow.add(scim);
+  rig.arms.L.elbow.add(scim);
 
   return {
-    ...rig, name: 'SULTAN BIGOTES', side: 'B', facing: 0,
-    sword: scim, swordArm: 'R', ribbons, turban, dish: { skirt }
+    ...rig, name: 'SULTAN BIGOTES', side: 'A', facing: Math.PI,
+    sword: scim, swordArm: 'L', ribbons, turban, dish: { skirt }
   };
 }
 
@@ -592,12 +595,15 @@ const NUM_KEYS = Object.keys(IDLE_TEMPLATE);
 // charging lunge visibly do not cost the same effort. Scaled per move below.
 const RECOVER_T = {
   RUSH: 0.30, LUNGE: 0.22, SLASH_UP: 0.20, THRUST: 0.18, SLASH_SPIN: 0.24,
-  RIPOSTE: 0.24, FEINT: 0.10, PARRY_HOP: 0.10, PARRY_BEAT: 0.08, TAUNT: 0.16, HIT: 0.14
+  RIPOSTE: 0.24, FEINT: 0.10, PARRY_HOP: 0.10, PARRY_BEAT: 0.08, TAUNT: 0.16, HIT: 0.14,
+  SIT_GUARD: 0.12   // v18: standing back up from the seated guard is a settle, not a windmill
 };
 
 export class DuelCat {
   constructor(kind) {
-    this.data = kind === 'A' ? buildDonGato() : buildSultanBigotes();
+    // v18 IDENTITY (user directive): the MOSLEM cat (Sultan) is side A = BUY,
+    // the SPANISH knight (Don Gato) is side B = SELL.
+    this.data = kind === 'A' ? buildSultanBigotes() : buildDonGato();
     const d = this.data;
     this.root = d.root;
     this.root.rotation.y = d.facing;
@@ -642,6 +648,7 @@ export class DuelCat {
       case 'TAUNT': this._taunt(ctx); break;
       case 'PARRY_HOP': this._parryHop(ctx); break;
       case 'PARRY_BEAT': this._parryBeat(ctx); break;
+      case 'SIT_GUARD': this._sitGuard(ctx); break;
       case 'SLASH_SPIN': this._slashSpin(ctx); break;
       case 'RIPOSTE': this._riposte(ctx); break;
       case 'FREEZE': this._freeze(ctx); break;
@@ -1003,6 +1010,35 @@ export class DuelCat {
       tg.shS_x = 0.15;
       tg.crouch = 0.03 + rf * 0.02;
     }
+  }
+
+  // v18: the seated sword guard (user: "sit down and defend with his sword").
+  // A POSTURE, not a strike: the cat drops his haunches onto the rope, seat
+  // low, sword arm raised in a closed high guard, off arm braced, tail
+  // wrapped, ears back. The director renews it while the tape stays against
+  // him; hold-breathing keeps it alive without looking frozen.
+  _sitGuard(ctx) {
+    const tg = this.target, t = this.time;
+    const breathe = Math.sin(t * 1.9) * 0.03;
+    const guardUp = Math.sin(t * 2.4) * 0.06;
+    tg.crouch = 0.30 + breathe;                    // the seat: deep haunch drop
+    tg.spineLean = -0.10 + breathe * 0.4;          // upright under the guard
+    tg.headPitch = 0.10;                           // eyes on the foe, chin down
+    tg.headYaw = -this.fw * 0.12;
+    tg.shS_z = 1.15 + guardUp;                     // sword arm UP in the guard
+    tg.shS_x = 0.30;
+    tg.elS = -1.25 + guardUp;                      // closed: point stays high
+    tg.shO_z = -0.55;                              // off arm braced across
+    tg.shO_x = 0.35;
+    tg.elO = -0.9;
+    tg.knL = -0.85; tg.knR = -0.85;                // haunches folded
+    tg.thL = 0.42; tg.thR = 0.42;                  // thighs forward, sitting
+    tg.footL = 0.25; tg.footR = 0.25;
+    tg.tailCurl = (this.data.side === 'A' ? -1.15 : 0.95) * 1.5;  // wrapped tail
+    tg.tailAmp = 0.04;
+    tg.earSwivel = 0;
+    // a guarded cat still TRACKS the flag with his ears
+    if (ctx.flagDart) tg.headYaw += -this.fw * 0.1;
   }
 
   _slashSpin(ctx) {

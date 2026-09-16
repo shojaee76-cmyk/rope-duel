@@ -106,14 +106,16 @@ export function createDuelScene(container, opts = {}) {
     amb.embers = buildEmberDrift(scene, amb.vfxScale);
   }
   buildSkyline(scene);
-  /* The live tape, in the sky. The candle chart used to be a DOM panel pinned to
-   * the bottom of the screen; the duel is fed by that tape, so it is drawn into
-   * the world instead: one wide light panel high behind the arena, above the wall
-   * and the cats (?sky=slab|aurora|stars picks the treatment). */
+  /* The live tape, ON THE WALL (v18). The candle chart used to be a sky panel,
+   * then a DOM panel; now it is a screen mounted on the walnut tape board that
+   * arena.js hangs on the blanked centre of the back wall (?sky=slab|aurora|
+   * stars picks the treatment). World-fixed: it drifts with the wall as the
+   * camera follows the fight. */
   const skyChart = createSkyChart(scene, camera, {
     variant: opts.skyVariant || 'slab',
     renderer,
     anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
+    board: arena.userData.tapeBoard,   // v18: mount the tape on the wall board
   });
   function onMouse(e) {
     const w = container.clientWidth || innerWidth, h = container.clientHeight || innerHeight;

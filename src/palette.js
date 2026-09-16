@@ -1,33 +1,34 @@
 // THE ROPE DUEL — canonical palette.
 // FINANCIAL CONVENTION (user directive, task t_167a53f3): BUY = GREEN, SELL = RED.
-// The token names keep their original semantic slots so every consumer keeps
-// working — only the hex values that carry the side identity changed:
-//   Cat A = DON GATO  = BUY  side (right pole)  = GREEN cloth family on gold armour
-//   Cat B = SULTAN    = SELL side (left pole)   = CRIMSON cloth family on silver
-// Gold/silver/steel are armour neutrals; green/red are the team hues.
+// v18 IDENTITY (user directive): the MOSLEM cat (Sultan Bigotes) is the BUY side
+// and the SPANISH knight (Don Gato) is the SELL side. The builders swapped
+// slots in cats.js, so the token blocks below follow the CAT, not the pole:
+//   Cat A = SULTAN     = BUY  side (right pole)  = GREEN cloth family on silver
+//   Cat B = DON GATO   = SELL side (left pole)   = CRIMSON cloth family on gold armour
+// The legacy alias names (crimson*/emerald*/gem*) re-align with their hues:
+// crimson* really is red again, emerald* really is green again. Consumers keep
+// working unchanged; only the identity carried by each value moved.
 export const CAT_A = {
   goldPrimary: '#D4A017', goldBright: '#F5C542', goldShadow: '#8C6A1D',
-  // cloth family (cape, plume, tabard, doublet): was crimson, now BUY green
-  greenMain: '#1B7A4B', greenDeep: '#0E4A2C', leatherBrown: '#5C3A21',
+  // cloth family on the SELL knight (cape, plume, tabard, doublet): RED
+  greenMain: '#A31621', greenDeep: '#7A0C14', leatherBrown: '#5C3A21',
   furWhite: '#F5F0E6', furGinger: '#C96A2B', furPatchShadow: '#A24E1B',
   nosePink: '#E8A0A0', eyeAmber: '#FFB84D', steelBlade: '#C0C6CC',
-  // pommel gem: was ruby, now emerald (was Cat B's gem before the flip)
-  gemEmerald: '#34D399',
-  // legacy aliases so any un-migrated reference still resolves to the SAME hue
-  crimsonMain: '#1B7A4B', crimsonDeep: '#0E4A2C', gemRuby: '#34D399'
+  gemEmerald: '#C22240',
+  // legacy aliases (material slots): crimson* = SELL red on Don Gato
+  crimsonMain: '#A31621', crimsonDeep: '#7A0C14', gemRuby: '#C22240'
 };
 
 export const CAT_B = {
-  // cloth family (robe trim, turban band, cuffs, placket): was emerald, now SELL red
-  redMain: '#A31621', redBright: '#C0392B', redDeep: '#7A0C14',
+  // trim family on the BUY sultan (turban band, cuffs, placket, hem): GREEN
+  redMain: '#1B7A4B', redBright: '#35D07F', redDeep: '#0E4A2C',
   silverMain: '#C9D1D9', silverBright: '#E8EDF2', silverShadow: '#8F98A3',
   clothWhite: '#F2EFE9', furCharcoal: '#2E2E38', furSilverStripe: '#9AA0AA',
-  furBelly: '#B9BFC7', eyeJade: '#FF8A80', noseBlack: '#1A1A22',
-  // pommel gem: was emerald, now ruby (was Cat A's gem before the flip)
-  gemRuby: '#C22240',
+  furBelly: '#B9BFC7', eyeJade: '#35D07F', noseBlack: '#1A1A22',
+  gemRuby: '#34D399',
   steelBlade: '#C0C6CC',
-  // legacy aliases so any un-migrated reference still resolves to the SAME hue
-  emeraldMain: '#A31621', emeraldBright: '#C0392B', emeraldDeep: '#7A0C14', gemEmerald: '#C22240'
+  // legacy aliases (material slots): emerald* = BUY green on Sultan
+  emeraldMain: '#1B7A4B', emeraldBright: '#35D07F', emeraldDeep: '#0E4A2C', gemEmerald: '#34D399'
 };
 
 // Side-level convenience tokens: the canonical BUY/SELL hues for lights, VFX,

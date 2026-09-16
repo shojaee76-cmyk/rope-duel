@@ -122,7 +122,7 @@ export class PriceFlag {
     }
     if (this.spin > 0) this.spin = Math.max(0, this.spin - dt * 2);
 
-    const p = rope.pointAt(8);
+    const p = rope.pointAt(5);   // v18: segment 5 (x ~ -5.8) - segment 8 hung the banner over the wall tape board
     this.group.position.set(
       p.x, p.y + this.bob, THREE.MathUtils.clamp(p.z, -0.3, 0.3)
     );

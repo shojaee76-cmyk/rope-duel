@@ -11,7 +11,7 @@
 // per tile (the old repeat.set(3,2) stamped SIX of them across the courtyard).
 import * as THREE from '../vendor/three.module.js';
 import { ARENA, MATERIALS, DIM } from './palette.js';
-import { canvasTexture, stoneTexture, stoneCanvas, bumpFrom } from './tex.js';
+import { canvasTexture, stoneTexture, stoneCanvas, bumpFrom, clothTexture } from './tex.js';
 
 const std = (color, kind = 'cloth', extra = {}) =>
   new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
@@ -275,27 +275,89 @@ export function buildArena(scene) {
   const lowerWall = mesh(new THREE.BoxGeometry(wallW, arcSpringY, 0.5), wallMat, 0, arcSpringY / 2, wallZ);
   arena.add(lowerWall);
 
-  // dado band (azulejo)
+  // dado band (azulejo) - v18: split into two FLANK segments so the centre of
+  // the wall is a blank mounting zone for the live tape board (user: "Make
+  // wall blank so chart is visible")
   const azTex = azulejoTexture();
-  azTex.repeat.set(10, 1);
   const azBump = bumpFrom(azTex.image, 1.0);
-  azBump.repeat.copy(azTex.repeat);
-  const dado = mesh(
-    new THREE.BoxGeometry(wallW, dadoH, 0.54),
-    new THREE.MeshStandardMaterial({ map: azTex, bumpMap: azBump, bumpScale: 0.05, roughness: 0.5 }),
-    0, dadoH / 2, wallZ + 0.01
-  );
-  arena.add(dado);
+  const DADO_GAP = 3.9;                       // blank centre half-width
+  const segW = wallW / 2 - DADO_GAP;          // each flank segment width
+  const dadoSeg = (cx, w) => {
+    const t = azTex.clone(); t.needsUpdate = true;
+    t.repeat.set(w / 2.6, 1);                 // 2.6 world units per tile sheet (was 26/10)
+    const b = azBump.clone(); b.needsUpdate = true; b.repeat.copy(t.repeat);
+    return mesh(
+      new THREE.BoxGeometry(w, dadoH, 0.54),
+      new THREE.MeshStandardMaterial({ map: t, bumpMap: b, bumpScale: 0.05, roughness: 0.5 }),
+      cx, dadoH / 2, wallZ + 0.01
+    );
+  };
+  arena.add(dadoSeg(-(DADO_GAP + segW / 2), segW));
+  arena.add(dadoSeg(+(DADO_GAP + segW / 2), segW));
 
-  // frieze band above dado
+  // frieze band above dado - same centre gap as the dado
   const frTex = friezeTexture();
-  frTex.repeat.set(6, 1);
-  const frieze = mesh(
-    new THREE.BoxGeometry(wallW, friezeH, 0.55),
-    new THREE.MeshStandardMaterial({ map: frTex, roughness: 0.9 }),
-    0, dadoH + friezeH / 2, wallZ + 0.01
+  const friezeSeg = (cx, w) => {
+    const t = frTex.clone(); t.needsUpdate = true;
+    t.repeat.set(w / (wallW / 6), 1);         // 6 sheets across the old full width
+    return mesh(
+      new THREE.BoxGeometry(w, friezeH, 0.55),
+      new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 }),
+      cx, dadoH + friezeH / 2, wallZ + 0.01
+    );
+  };
+  arena.add(friezeSeg(-(DADO_GAP + segW / 2), segW));
+  arena.add(friezeSeg(+(DADO_GAP + segW / 2), segW));
+
+  // ---- v18 THE TAPE BOARD: the live candle chart is mounted on the wall ----
+  // (user: "take the chart out of sky and put it on the wall"). A walnut
+  // display board hung on the blank centre of the wall; skychart.js draws the
+  // tape onto a plane floating just in front of it (scene.js owns the offset).
+  // Kept clear of the pier torches (flame tips reach y 4.02 at x +-4.6; the
+  // board top sits above them) and sized so the camera's centre ray, which
+  // lands at wall height ~2.66, hits the candles band.
+  const BOARD_W = 8.2, BOARD_H = 3.17;
+  const walnutPair = clothTexture({ seed: 91, weave: 14, thread: 'rgba(30,18,8,0.5)' });
+  walnutPair.map.wrapS = walnutPair.map.wrapT = THREE.RepeatWrapping;
+  walnutPair.map.repeat.set(3, 1.2);
+  const boardMat = new THREE.MeshStandardMaterial({
+    color: '#5B3A21', map: walnutPair.map, bumpMap: walnutPair.bump,
+    bumpScale: 0.04, roughness: 0.62, metalness: 0.05
+  });
+  const boardY = dadoH + friezeH + BOARD_H / 2 + 0.06;   // 3.11
+  const board = mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, 0.18), boardMat, 0, boardY, wallZ + 0.30);
+  arena.add(board);
+  // frame trim: slightly proud edge so the board reads as carpentry, not a decal
+  const trimMat2 = new THREE.MeshStandardMaterial({ color: '#3E2712', roughness: 0.55 });
+  arena.add(mesh(new THREE.BoxGeometry(BOARD_W + 0.14, 0.1, 0.20), trimMat2, 0, boardY + BOARD_H / 2 + 0.04, wallZ + 0.30));
+  arena.add(mesh(new THREE.BoxGeometry(BOARD_W + 0.14, 0.1, 0.20), trimMat2, 0, boardY - BOARD_H / 2 - 0.04, wallZ + 0.30));
+  arena.add(mesh(new THREE.BoxGeometry(0.1, BOARD_H + 0.14, 0.20), trimMat2, -(BOARD_W / 2 + 0.04), boardY, wallZ + 0.30));
+  arena.add(mesh(new THREE.BoxGeometry(0.1, BOARD_H + 0.14, 0.20), trimMat2, +(BOARD_W / 2 + 0.04), boardY, wallZ + 0.30));
+  // two cleats angle it off the stone (visible from below, sells the mount)
+  arena.add(mesh(new THREE.BoxGeometry(0.09, 0.32, 0.10), trimMat2, -BOARD_W / 2 + 0.5, boardY - BOARD_H / 2 - 0.14, wallZ + 0.14));
+  arena.add(mesh(new THREE.BoxGeometry(0.09, 0.32, 0.10), trimMat2, +BOARD_W / 2 - 0.5, boardY - BOARD_H / 2 - 0.14, wallZ + 0.14));
+  // contact shadow on the stone: a soft dark quad slightly larger than the
+  // board, so the board reads as mounted ON the wall, not painted on it
+  const shadowCanvas = document.createElement('canvas');
+  shadowCanvas.width = shadowCanvas.height = 128;
+  {
+    const g = shadowCanvas.getContext('2d');
+    const grd = g.createRadialGradient(64, 64, 8, 64, 64, 62);
+    grd.addColorStop(0, 'rgba(0,0,0,0.55)');
+    grd.addColorStop(0.7, 'rgba(0,0,0,0.28)');
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 128, 128);
+  }
+  const shadowTex = canvasTexture(shadowCanvas);
+  const wallShadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(BOARD_W * 1.22, BOARD_H * 1.3),
+    new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: 0.85 })
   );
-  arena.add(frieze);
+  wallShadow.position.set(0.12, boardY - 0.06, wallZ + 0.012);
+  wallShadow.renderOrder = -1;
+  arena.add(wallShadow);
+  arena.userData.tapeBoard = { y: boardY, w: BOARD_W, h: BOARD_H, z: wallZ + 0.30 };
 
   // coping + engaged piers + merlons: this is what carries the wall now that
   // the arch hoops are gone, so it gets real stone texture too
@@ -304,13 +366,15 @@ export function buildArena(scene) {
   const coping = mesh(new THREE.BoxGeometry(wallW, 0.16, 0.62), copingMat, 0, arcSpringY + 0.08, wallZ + 0.02);
   arena.add(coping);
   const pierMat = texed(ARENA.stoneShadow, 'cloth', stonePair, { bumpScale: 0.1 });
-  const piersX = [-12.1, -7.4, -3.3, 3.3, 7.4, 12.1];
+  // v18: the INNER piers move out to +-4.6 so the board zone (half-width 3.75)
+  // stays clear of stone in front of it; torches follow their perches
+  const piersX = [-12.1, -7.4, -4.6, 4.6, 7.4, 12.1];
   for (const px of piersX) {
     arena.add(mesh(new THREE.BoxGeometry(1.0, 3.35, 0.68), pierMat, px, 1.675, wallZ + 0.09));
     arena.add(mesh(new THREE.BoxGeometry(1.2, 0.22, 0.76), texed(ARENA.stoneWall, 'cloth', stonePair), px, 3.46, wallZ + 0.09));
   }
   const merlonMat = texed(ARENA.stoneWall, 'cloth', stonePair, { bumpScale: 0.1 });
-  for (const x of [-12, -7.4, -3.3, 3.3, 7.4, 12]) {
+  for (const x of [-12, -7.4, -4.6, 4.6, 7.4, 12]) {
     const stepped = Math.abs(x) > 9 || Math.abs(x) < 5;
     arena.add(mesh(new THREE.BoxGeometry(0.9, 0.42, 0.5), merlonMat, x, arcSpringY + 0.37, wallZ));
     if (stepped) {
@@ -380,8 +444,9 @@ export function buildArena(scene) {
   }
   groups.pennants = pennants;
 
-  // ---- torches ON the pier tops (they used to float in front of the arches) ----
-  const torchXs = [-7.4, -3.3, 3.3, 7.4];
+  // ---- torches ON the pier tops (they used to float in front of the arches;
+  // v18: the inner pair follows its pier out to +-4.6, clear of the board) ----
+  const torchXs = [-7.4, -4.6, 4.6, 7.4];
   for (const tx of torchXs) {
     const bracket = mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5), std(ARENA.iron, 'cloth'), tx, 3.62, wallZ + 0.42);
     arena.add(bracket);
