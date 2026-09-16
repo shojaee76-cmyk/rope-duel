@@ -163,8 +163,10 @@ export function createDuelScene(container, opts = {}) {
         foe.x = clampFoe(foe.x + dir * (heavy ? 0.5 : 0.3));
         director.resolveHit(side, dir);
         vfx.dustBurst({ x: foe.x, y: rope.yAt(foe.x), z: 0 });
+        // the shake stays (that is a real impact) but the per-hit hit-stop is gone:
+        // it fired twice a second and read as a stutter rather than emphasis. The
+        // deliberate slow-mo on a blade-lock clash below is the one that lands.
         kick(heavy ? 0.12 : 0.07, heavy ? 0.11 : 0.06);
-        if (heavy) slowmo = Math.max(slowmo, 0.08);
       }
     }
     rope.injectImpulse(cat.x, 0, -0.7, 0);
@@ -180,7 +182,7 @@ export function createDuelScene(container, opts = {}) {
       const tip = cat.bladeTipWorld();
       if (sideOf(cat) === 'A') {
         vfx.emberBurst(tip);
-        if (kind === 'up') slowmo = Math.max(slowmo, 0.22);
+        if (kind === 'up') slowmo = Math.max(slowmo, 0.19);
       } else {
         vfx.ghost(tip);
         vfx.ghostTile(tip);
@@ -465,11 +467,15 @@ export function createDuelScene(container, opts = {}) {
 
     flag.update(dt, rope);
 
-    // fight heat: rises while the cats are locked in, decays otherwise
+    // fight heat now follows the director's SMOOTHED brawl intensity instead of the
+    // binary "is either cat locked" flag. The flag flipped on every state change, so
+    // the heat (and with it the crowd's energy) sawtoothed from 0 to 0.83 and the
+    // camera chased the same flag with a 0.38 s time constant, pumping in and out at
+    // roughly 2 Hz. One low-passed source, one steady breathing rhythm.
     const brawling = catA.state.name === 'BLADE_LOCK' || catA.state.name === 'CLASH' ||
                      catB.state.name === 'BLADE_LOCK' || catB.state.name === 'CLASH';
-    heat = Math.max(0, heat - dt * 0.55);
-    if (brawling) heat = Math.min(1, heat + dt * 1.2);
+    const brawl = director.brawlIntensity();
+    heat += (brawl - heat) * Math.min(1, dt / 0.8);
 
     // blade lock: a steady shower of sparks at the crossing blades
     if (brawling && frameCount % 3 === 0) {
@@ -526,7 +532,9 @@ export function createDuelScene(container, opts = {}) {
     const s = (shk / 0.16) * shake.amp;
     const centre = (catA.x + catB.x) * 0.5;
     camPan += (centre - camPan) * Math.min(1, dt * 3.2);
-    camPush += ((brawling ? 1 : 0) - camPush) * Math.min(1, dt * 2.6);
+    // the zoom rides the same smoothed intensity (was: a binary flag chased at
+    // dt*2.6, which reversed direction ~4x as often)
+    camPush += (brawl - camPush) * Math.min(1, dt * 1.4);
     const idleDriftX = Math.sin(simTime * 0.09) * 0.18;
     camera.position.set(
       camPan + idleDriftX + (Math.random() - 0.5) * s + amb.mouse.x * 0.5,

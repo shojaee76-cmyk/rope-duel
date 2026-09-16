@@ -165,9 +165,26 @@ function actFor(name) {
   if (name === 'HIT' || name === 'STUMBLE') return 'hit';
   return '';
 }
-function setFighter(side, name) {
+// The plates used to be rewritten the instant the fight state changed, and the
+// fight ran through ~1.7 states a second, so the label strobed. Reactions now hold
+// for a beat; the payoff states (a clash landing, a hit) still show immediately.
+const PLATE_DWELL = 180;            // ms a label holds before it may change again
+const PLATE_URGENT = new Set(['CLASH', 'HIT', 'BLADE_LOCK']);
+// RECOVER is the plumbing between moves and IDLE is a lull, so neither is a fight
+// event: they only reach the plate once they have actually settled. Between them
+// they were responsible for most of the 1.6 label changes per second, which is what
+// read as a twitching HUD rather than a steady fight.
+const PLATE_SETTLE = { RECOVER: 0.18, IDLE: 0.30 };
+function setFighter(side, st) {
   const p = plates[side];
-  if (!p || name === p.last) return;
+  if (!p) return;
+  const name = st.name;
+  if (name === p.last) return;
+  const urgent = PLATE_URGENT.has(name);
+  if (!urgent && st.t < (PLATE_SETTLE[name] || 0)) return;
+  const now = performance.now();
+  if (!urgent && !PLATE_URGENT.has(p.last) && now - (p.at || 0) < PLATE_DWELL) return;
+  p.at = now;
   p.last = name;
   const act = actFor(name);
   p.el.dataset.act = act;
@@ -211,7 +228,7 @@ setInterval(() => {
     if (!d || !d.catA || !d.catB) return;
     const an = d.catA.state.name, bn = d.catB.state.name;
     // catA = Don Gato (BUY, right), catB = Sultan Bigotes (SELL, left)
-    setFighter('buy', an); setFighter('sell', bn);
+    setFighter('buy', d.catA.state); setFighter('sell', d.catB.state);
     const key = an + '|' + bn;
     if (key === lastDuelKey) return;
     lastDuelKey = key;

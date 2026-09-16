@@ -85,9 +85,28 @@ export class FightDirector {
     this.lockCool = 0;             // minimum spacing between blade locks
     this._beats = [];              // timed callbacks (slow-mo safe, no setTimeout)
     this.engage = 0;               // 0..1 how committed the brawl is right now
+
+    // ---- v13 steadiness --------------------------------------------------------
+    // Measured before this: attack intervals with a coefficient of variation of
+    // 1.16 (an sd larger than the mean), 2-second windows swinging between 0 and 6
+    // attacks, and locks arriving in runs of four followed by twenty seconds of
+    // nothing. Every one of those came from re-drawing a random number where a beat
+    // belonged, plus acting on the raw pressure, which is noisy at 4 Hz.
+    this.pS = 0;                   // smoothed pressure used for DECISIONS (tau 1.2s)
+    this.lastLockAt = -99;         // when the last blade lock started (lock cadence)
+    this._lastUsed = {};           // move name -> when it was last used (rotation)
+    this._lastWinner = null;       // locks alternate when the tape is flat
+    this._slotAt = undefined;      // next attack slot on the beat clock
+    this._lastAnswerAt = -9;       // when the last counter-attack/answer fired
+    this.intensity = 0;            // 0..1 smoothed brawl intensity (camera + crowd)
+    this.log = [];                 // recent starts: { t, side, move, reason }
+    this.reasons = {};             // reason -> count (which source drives the fight)
   }
 
   // ---------- public API (called by the data module) ----------
+  // smoothed brawl intensity (0..1) that the scene's camera and crowd follow
+  brawlIntensity() { return this.intensity; }
+
   setPressure(P) {
     this.pressure = clamp(P, -1, 1);
     this._events.push({ type: 'pressure', P: this.pressure });
@@ -129,6 +148,19 @@ export class FightDirector {
     this.now += dt;
     this._lastDt = dt;
     const A = this.cats.A, B = this.cats.B;
+
+    // the live tape is noisy and every decision below used to read the raw value,
+    // so aggression flickered frame to frame. Decisions read a 1.2 s exponential
+    // average now; the raw pressure still drives the HUD meter, untouched.
+    this.pS += (this.pressure - this.pS) * Math.min(1, dt / 1.2);
+
+    // one continuous brawl intensity for the camera and the crowd, replacing the
+    // binary "is either cat locked" flag the scene used to chase
+    const W = { BLADE_LOCK: 1, CLASH: 0.85, HIT: 0.7, LUNGE: 0.62, RUSH: 0.62, RIPOSTE: 0.55,
+      STUMBLE: 0.5, TAUNT: 0.32, RECOVER: 0.24, PARRY_HOP: 0.18, IDLE: 0.08, FREEZE: 0.05 };
+    const want = Math.max(W[A.state.name] === undefined ? 0.12 : W[A.state.name],
+                          W[B.state.name] === undefined ? 0.12 : W[B.state.name]);
+    this.intensity += (want - this.intensity) * Math.min(1, dt / 0.7);
 
     // beats (lock -> clash -> recover chains) run on the sim clock
     if (this._beats.length) {
@@ -175,20 +207,28 @@ export class FightDirector {
     this.phaseT += dt;
     if (this.phaseT >= this.phaseDur) {
       this.phaseT = 0;
-      const P = Math.abs(this.pressure);
-      // busier tape = longer brawls, shorter circling
+      // The phase rhythm used to be redrawn from wide random ranges on every
+      // transition (circle 0.7-1.6 s, engage 0.9-2.1 s, break 0.35-0.85 s), so the
+      // fight had no pulse to follow. It now runs on one bar whose length only
+      // breathes with the smoothed tape temperature (1.55-1.9 s), split into fixed
+      // shares with +/-8% jitter: close in for 26% of the bar, break 13%, circle 61%.
+      // the targets themselves are also closer together than they were (1.45/2.25/
+      // 1.95): a wide swing in the pair's distance read as the two of them surging
+      // at each other and backing off, which is half of what "flakey" looked like
+      const bar = 1.9 - Math.abs(this.pS) * 0.35;
+      const jit = 0.92 + Math.random() * 0.16;
       if (this.phase === 'circle') {
         this.phase = 'engage';
-        this.phaseDur = 0.9 + Math.random() * 1.2 + P * 0.8;
-        this.gapTarget = 1.45 + Math.random() * 0.40;
+        this.phaseDur = bar * 0.26 * jit;
+        this.gapTarget = 1.60 + Math.random() * 0.08;
       } else if (this.phase === 'engage') {
         this.phase = 'break';
-        this.phaseDur = 0.35 + Math.random() * 0.5;
-        this.gapTarget = 2.25 + Math.random() * 0.7;
+        this.phaseDur = bar * 0.13 * jit;
+        this.gapTarget = 2.24 + Math.random() * 0.10;
       } else {
         this.phase = 'circle';
-        this.phaseDur = 0.7 + Math.random() * 0.9;
-        this.gapTarget = 1.95 + Math.random() * 0.55;
+        this.phaseDur = bar * 0.61 * jit;
+        this.gapTarget = 2.06 + Math.random() * 0.10;
       }
     }
     this.engage = this.phase === 'engage' ? 1 : 0;
@@ -223,9 +263,21 @@ export class FightDirector {
 
   // the beat clock: if nothing has happened for TEMPO seconds, somebody attacks
   _tempoTick() {
-    const tempo = this.phase === 'engage' ? 0.42 : 1.05;
-    if (this.now - this.lastMoveAt < tempo) return;
-    const P = this.pressure;
+    // The attack clock has a PHASE, not a queue. Before this it asked "has it been
+    // long enough since the last move?" and retried every frame, so attacks blocked
+    // by a blade lock piled up and then fired together the moment the lock ended:
+    // that is where the 0-and-6-per-two-seconds bursts came from (attribution run:
+    // tempo starts with a coefficient of variation of 0.68). Now each slot is
+    // scheduled when the previous one comes due, and a slot the fighters cannot use
+    // is skipped rather than saved up.
+    // a gentler contrast between the engage window and the circling than 0.44/0.92:
+    // the attack density still rises as they close, but the pair no longer lurches
+    // from a flurry to a lull, which is what the burst measure was picking up
+    const tempo = this.phase === 'engage' ? 0.56 : 0.80;
+    if (this._slotAt === undefined) this._slotAt = this.now + 0.25;
+    if (this.now < this._slotAt) return;
+    this._slotAt = this.now + tempo * (0.9 + Math.random() * 0.2);
+    const P = this.pS;
     // the side with pressure initiative presses harder
     const wantA = P >= 0 ? Math.random() < (0.5 + Math.min(0.35, Math.abs(P) * 0.5)) : Math.random() < 0.35;
     const first = wantA ? 'A' : 'B';
@@ -237,25 +289,29 @@ export class FightDirector {
       const pick = closeRange
         ? pool.filter((m) => m !== 'TAUNT')
         : pool;
-      for (const mv of this._shuffled(pick)) {
-        if (this._canMove(side, mv)) { this._start(side, mv, { dir: this._fw(side) }); return; }
+      for (const mv of this._ordered(pick)) {
+        if (this._canMove(side, mv)) { this._start(side, mv, { dir: this._fw(side) }, 'tempo'); return; }
       }
     }
     // both busy: try the defensive/repositioning option
     for (const side of ['A', 'B']) {
       for (const mv of side === 'A' ? ['TAUNT'] : ['PARRY_HOP']) {
-        if (this._canMove(side, mv)) { this._start(side, mv, { dir: this._fw(side) }); return; }
+        if (this._canMove(side, mv)) { this._start(side, mv, { dir: this._fw(side) }, 'tempo'); return; }
       }
     }
   }
 
-  _shuffled(arr) {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
+  // least-recently-used order: a shuffle could open with the same move twice
+  // running (measured: four locks back to back, then a long drought). Oldest first,
+  // plus a small draw so the sequence stays alive instead of perfectly periodic.
+  _ordered(pool) {
+    const j = {};
+    for (const m of pool) j[m] = Math.random() * 0.5;
+    return pool.slice().sort((a, b) => {
+      const la = (this._lastUsed[a] === undefined ? -20 : this._lastUsed[a]) + j[a];
+      const lb = (this._lastUsed[b] === undefined ? -20 : this._lastUsed[b]) + j[b];
+      return la - lb;
+    });
   }
 
   _fw(side) { return side === 'A' ? -1 : 1; }   // world-x toward the opponent
@@ -294,8 +350,8 @@ export class FightDirector {
     // ---- momentum flips (priority 2): the tape turns -> the lead cat taunts ----
     const M = this.trendM();
     if (this._prevM !== undefined && M !== 0 && this._prevM !== 0 && Math.sign(M) !== Math.sign(this._prevM)) {
-      if (M > 0 && this._canMove('A', 'TAUNT')) { this._start('A', 'TAUNT', { dir: this._fw('A') }); return; }
-      if (M < 0 && this._canMove('B', 'RIPOSTE')) { this._start('B', 'RIPOSTE', { dir: this._fw('B') }); return; }
+      if (M > 0 && this._canMove('A', 'TAUNT')) { this._start('A', 'TAUNT', { dir: this._fw('A') }, 'momentum'); return; }
+      if (M < 0 && this._canMove('B', 'RIPOSTE')) { this._start('B', 'RIPOSTE', { dir: this._fw('B') }, 'momentum'); return; }
     }
     this._prevM = M;
 
@@ -304,18 +360,18 @@ export class FightDirector {
     for (const ev of events) {
       if (ev.type === 'pressure') {
         if (this.prevP <= 0.35 && ev.P > 0.35 && this._canMove('A', 'RUSH')) {
-          this._start('A', 'RUSH', { dir: this._fw('A') }); sawSpike = true; break;
+          this._start('A', 'RUSH', { dir: this._fw('A') }, 'spike'); sawSpike = true; break;
         }
         if (this.prevP >= -0.35 && ev.P < -0.35 && this._canMove('B', 'PARRY_HOP')) {
-          this._start('B', 'PARRY_HOP', { dir: this._fw('B') }); sawSpike = true; break;
+          this._start('B', 'PARRY_HOP', { dir: this._fw('B') }, 'spike'); sawSpike = true; break;
         }
         this.prevP = ev.P;
       }
     }
     if (!sawSpike) this.prevP = P;
     for (const ev of events) {
-      if (ev.type === 'newHigh15' && this._canMove('A', 'SLASH_UP')) { this._start('A', 'SLASH_UP', { dir: this._fw('A') }); return; }
-      if (ev.type === 'newLow15' && this._canMove('B', 'SLASH_SPIN')) { this._start('B', 'SLASH_SPIN', { dir: this._fw('B') }); return; }
+      if (ev.type === 'newHigh15' && this._canMove('A', 'SLASH_UP')) { this._start('A', 'SLASH_UP', { dir: this._fw('A') }, 'extreme'); return; }
+      if (ev.type === 'newLow15' && this._canMove('B', 'SLASH_SPIN')) { this._start('B', 'SLASH_SPIN', { dir: this._fw('B') }, 'extreme'); return; }
     }
   }
 
@@ -331,13 +387,17 @@ export class FightDirector {
     return true;
   }
 
-  _start(side, move, data = {}) {
+  _start(side, move, data = {}, reason = 'tempo') {
     const spec = MOVES[move];
+    this.log.push({ t: +this.now.toFixed(2), side, move, reason });
+    if (this.log.length > 400) this.log.shift();
+    this.reasons[reason] = (this.reasons[reason] || 0) + 1;
     const cat = this.cats[side];
     // travel distance is bounded by the live gap: they close in, never overlap
     if (move === 'RUSH' || move === 'LUNGE') {
       data.reach = clamp(this.gap - 1.15, 0.12, 1.0);
     }
+    this._lastUsed[move] = this.now;
     this.cools[move] = this.now + spec.cool;
     this.sideCool[side] = this.now + 0.55;   // short: the other cat answers fast
     this.active[side] = move;
@@ -347,10 +407,13 @@ export class FightDirector {
     cat.setState(move, spec.len, data);
     // the opponent reacts: parry or counter, which is what makes clashes happen
     const foe = side === 'A' ? 'B' : 'A';
-    if (OFFENSIVE.has(move) && !this.active[foe] && Math.random() < 0.5) {
+    // the counter used to fire on a fresh coin flip half the time, which doubled the
+    // attack rate unpredictably; it now shares the beat's spacing
+    if (OFFENSIVE.has(move) && !this.active[foe] && this.now - this._lastAnswerAt > 0.42 && Math.random() < 0.45) {
       const def = foe === 'B' ? 'PARRY_HOP' : 'LUNGE';
       if (this._canMove(foe, def)) {
-        this._start(foe, def, { dir: this._fw(foe) });
+        this._start(foe, def, { dir: this._fw(foe) }, 'reaction');
+        this._lastAnswerAt = this.now;
       }
     }
   }
@@ -395,9 +458,19 @@ export class FightDirector {
     const canParry = DEFENSIVE.has(defMove) || OFFENSIVE.has(defMove);
     const near = this.gap < 1.75;
     if (!near) return false;
-    if (Math.random() > (canParry ? 0.6 : 0.18)) return false;
-    // winner = current pressure favours that side
-    const winner = this.pressure > 0.02 ? 'A' : this.pressure < -0.02 ? 'B' : (Math.random() < 0.5 ? 'A' : 'B');
+    // The odds are the original ones (they produced a lock every ~6 s, and my first
+    // attempt at "steadier" halved the highlights - measured, so it went back), but
+    // they now have a cadence guard: a fresh lock cuts the chance and an overdue one
+    // raises it, so the draws cannot pile up into runs or vanish into a drought.
+    const sinceLock = this.now - this.lastLockAt;
+    const base = canParry ? 0.6 : 0.18;
+    const guard = sinceLock < 4 ? 0.35 : sinceLock > 9 ? 1.25 : 1;
+    if (Math.random() > Math.min(0.92, base * guard)) return false;
+    // winner = current pressure favours that side; on a flat tape the locks simply
+    // alternate instead of being drawn at random
+    const winner = this.pS > 0.02 ? 'A'
+      : this.pS < -0.02 ? 'B'
+        : (this._lastWinner === 'A' ? 'B' : 'A');
     this._beginLock(winner);
     return true;
   }
@@ -405,7 +478,9 @@ export class FightDirector {
   // crossed blades -> shove -> break: the signature duelling beat
   _beginLock(winner) {
     const loser = winner === 'A' ? 'B' : 'A';
-    const lockDur = 0.38 + Math.random() * 0.22;
+    const lockDur = 0.42 + Math.random() * 0.10;
+    this.lastLockAt = this.now;
+    this._lastWinner = winner;
     this.busyUntil = this.now + lockDur + 0.55;
     this.active.A = 'BLADE_LOCK'; this.active.B = 'BLADE_LOCK';
     this.cats.A.setState('BLADE_LOCK', lockDur, { winner: winner === 'A' });
