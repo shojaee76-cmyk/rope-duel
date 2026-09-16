@@ -192,6 +192,33 @@ export function createDuelScene(container, opts = {}) {
     start(cat) { (cat.data.side === 'A' ? trailA : trailB).emit(cat.bladeTipWorld(_tip)); },
     update(dt) { trailA.update(dt); trailB.update(dt); }
   };
+
+  // ---- v15 moon slot ---------------------------------------------------------
+  // The moon used to be world-fixed while the sky tape panel is SCREEN-fixed
+  // (upper-right, x 0.672-0.985): measured with tools/moonprobe2.mjs, the disc
+  // swept screen-x 0.82 -> 0.17 as the camera followed the pair, so whenever the
+  // fight drifted left the moon sat straight behind the chart. On a phone the
+  // disc spans ~77% of the frame width and covered the chart band at nearly
+  // every pan. Fix: park it in the upper-LEFT sky, opposite the panel. The slot
+  // is a screen fraction unprojected onto the moon's own z plane each frame, and
+  // the moon tracks `par` of the camera travel (0.78 wide / 0.90 narrow): it
+  // keeps a little parallax so it stays part of the world, but the leftover
+  // drift (measured below) can never reach the panel band.
+  const MOON_Z = -7.45;   // keep in sync with arena.js
+  const MOON_SLOT = {
+    //   cx/cy: screen slot of the disc centre (fractions of frame w/h)
+    //   par:   fraction of camera pan the moon follows (1 = pinned to screen)
+    //   s:     extra scale (the phone disc was comically huge at 5.0 world)
+    // wide (>=1024): open sky left of the pressure meter, full size
+    wide:   { cx: 0.155, cy: 0.170, par: 0.78, s: 1.0 },
+    // mid tablet (700-1023): slightly smaller, tucked a little further into
+    // the corner so its right edge only grazes the meter's left edge
+    mid:    { cx: 0.130, cy: 0.150, par: 0.80, s: 0.85 },
+    // narrow phone (<700): corner park with slight frame bleed; the top HUD
+    // bar overlays its lower edge, the chart band stays clear
+    narrow: { cx: 0.130, cy: 0.050, par: 0.92, s: 0.52 }
+  };
+  const _mv = new THREE.Vector3();
   // contact telemetry (debug only): how often the head constraint had to fire and
   // how close the muzzle tips got BEFORE (worst) and AFTER (worstOut) the fix, so
   // the constraint's own output is verifiable, not just inferred from the render
@@ -603,13 +630,8 @@ export function createDuelScene(container, opts = {}) {
     if (amb.water) amb.water.update(simTime, dt);
     if (amb.embers) amb.embers.update(simTime);
 
-    // BTC moon: halo breathes with trading activity, flare on big events
-    const moon = arena.userData.moon;
-    if (moon) {
-      const m = moon.material;
-      m.color.setScalar(1 + amb.moonPulse * 0.34 + Math.sin(simTime * 0.8) * 0.04);
-      moon.scale.setScalar(1 + amb.moonPulse * 0.06);
-    }
+    // BTC moon: halo breathes with trading activity, flare on big events.
+    // (Position is handled after the camera update below - v15 screen slot.)
 
     // camera: close on the cats, follows the PAIR (not one cat), pushes in
     // during a brawl and kicks on impacts. v4 low-pass + dead zone retained.
@@ -629,6 +651,29 @@ export function createDuelScene(container, opts = {}) {
       6.8 - camPush * 0.55
     );
     camera.lookAt(camPan * 0.9, 3.15 - camPush * 0.1, 0);
+
+    // ---- v15 moon slot: screen-fixed park, opposite the sky tape panel ----
+    // The moon keeps a PARTIAL parallax (it follows `par` of the camera pan) so
+    // it still feels like an object in the world, but the slot is chosen so the
+    // leftover drift stays clear of the chart band (asserted by moonslotcheck).
+    const moon = arena.userData.moon;
+    if (moon) {
+      const m = moon.material;
+      m.color.setScalar(1 + amb.moonPulse * 0.34 + Math.sin(simTime * 0.8) * 0.04);
+      const vw = container.clientWidth || innerWidth;
+      const slot = vw < 700 ? MOON_SLOT.narrow : (vw < 1024 ? MOON_SLOT.mid : MOON_SLOT.wide);
+      // screen fraction -> world point on the moon's own z plane. Same ray
+      // march the sky chart uses (unproject -> normalize the direction ->
+      // march to the plane), then undo `par` of the camera pan so only
+      // (1 - par) of the travel reaches the moon.
+      _mv.set(slot.cx * 2 - 1, -(slot.cy * 2 - 1), 0.5).unproject(camera);
+      _mv.sub(camera.position).normalize();
+      const t = (MOON_Z - camera.position.z) / _mv.z;
+      const wx = camera.position.x + _mv.x * t - camera.position.x * (1 - slot.par);
+      const wy = camera.position.y + _mv.y * t;
+      moon.position.set(wx, wy, MOON_Z);
+      moon.scale.setScalar(slot.s * (1 + amb.moonPulse * 0.06));
+    }
 
     renderer.render(scene, camera);
     govern(rawDt * 1000);   // frame-time feedback for the quality governor

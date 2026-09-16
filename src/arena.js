@@ -256,7 +256,8 @@ export function buildArena(scene) {
   arena.userData.torches = groups.torches;
   arena.userData.coins = () => groups.coins;
 
-  // ---- BTC moon, now free in the open sky ----
+  // ---- BTC moon (the loop in scene.js owns its screen slot each frame: the
+  // world-fixed position here only feeds the very first frame) ----
   const moon = new THREE.Mesh(
     new THREE.PlaneGeometry(5.0, 5.0),
     new THREE.MeshBasicMaterial({ map: moonTexture(), transparent: true, fog: false, depthWrite: false })
