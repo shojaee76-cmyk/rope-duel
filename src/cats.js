@@ -38,6 +38,23 @@ const lerp = THREE.MathUtils.lerp;
 const smooth = (t) => t * t * (3 - 2 * t);
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
+// v19 tail rake: the chain hangs along -Y in its own frame, so a rotation.z of
+// -PI/2 points it straight BACK. Subtracting a little more lifts it ~34 degrees
+// above the horizontal; the per-segment curl in _applyPose arcs it from there.
+const TAIL_RAKE = -Math.PI / 2 - 0.60;
+
+// v19: the phase split shared by every strike below:
+//   windup -> swing -> HOLD -> settle
+// `hold` comes down from the director per move (MOVES/HOLD in director.js) and
+// is converted to a fraction of the move here. During the hold the pose sits
+// exactly at the top of the arc, which is the frame the eye needs to read the
+// blade; without it the sword was mid-arc on every frame of the animation.
+function swingPhases(state, windEnd, swingEndBase) {
+  const HF = clamp((state.data.hold || 0) / (state.dur || 1), 0, 0.34);
+  const p2 = swingEndBase - HF * 0.5;
+  return { HF, p1: windEnd, p2, p3: p2 + HF };
+}
+
 // ---------- texture cache (one canvas set per look, shared by every mesh) ----------
 const TEX = new Map();
 function tex(key, make) {
@@ -175,14 +192,30 @@ function buildRig(c) {
   }
 
   // tail chain
+  // v19 (user: "put the tail of the cats behind them not down"): the tail used
+  // to be a plain chain hanging along -Y from the rump, i.e. straight DOWN, and
+  // the two cats had opposite curl constants (-1.15 / +0.95), so one tail hung
+  // behind-down and the other one swung FORWARD (measured: tail tip 0.56 behind
+  // / 0.39 below the hips for A, and 0.26 in FRONT of B). It is now a real
+  // feline tail: raked BACK and UP out of the rump (TAIL_RAKE = 34 degrees above
+  // the horizontal), riding just off the body centreline in +z so it clears the
+  // knight's cape sheet and the sultan's robe, with each segment adding a gentle
+  // upward curl (see _applyPose) so the tip arcs up like an alert cat's.
   const tail = [];
   const tailBase = new THREE.Group();
-  tailBase.position.set(-0.12, 0.02, 0);
+  tailBase.position.set(-0.10, 0.06, 0.12);
+  tailBase.rotation.z = TAIL_RAKE;
   hips.add(tailBase);
   for (let i = 0; i < 6; i++) {
-    const seg = limb(i === 0 ? tailBase : tail[i - 1], 0, i === 0 ? 0 : -0.13, 0, 0.11, 0.038 - i * 0.003, M.fur);
+    // v19: the segments OVERLAP (0.15 of capsule over 0.13 of pivot spacing) and
+    // every joint carries a sphere. The old version left 0.02 gaps between
+    // capsules, which at tail size read as a segmented, branch-like stick
+    // (vision review: "several segmented pieces that do not smoothly connect").
+    const seg = limb(i === 0 ? tailBase : tail[i - 1], 0, i === 0 ? 0 : -0.13, 0, 0.15, 0.040 - i * 0.004, M.fur);
+    if (i > 0) seg.add(mesh(sphere(0.040 - i * 0.004, 8, 6), M.fur, 0, 0, 0));
     tail.push(seg);
   }
+  tail[5].add(mesh(sphere(0.030, 8, 6), M.fur, 0, -0.15, 0));   // rounded tip
 
   return { root, hips, spine, head, ears, arms, legs, tail, M, furPair };
 }
@@ -202,7 +235,7 @@ function buildRapier() {
   cup.rotation.y = Math.PI / 2;
   g.add(cup);
   g.add(mesh(sphere(0.02, 8, 6), gold, 0.025, 0, 0));
-  const blade = mesh(cyl(0.006, 0.013, 1.1, 6), steel, 0.61, 0, 0);
+  const blade = mesh(cyl(0.009, 0.018, 1.15, 6), steel, 0.63, 0, 0);
   blade.rotation.z = -Math.PI / 2;
   g.add(blade);
   g.add(mesh(sphere(0.03, 10, 8),
@@ -229,8 +262,8 @@ function buildScimitar() {
     const t = i / 8;
     pts.push(new V3(0.06 + t * 0.92, Math.sin(t * 1.5) * 0.16, 0));
   }
-  const blade = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.024, 6, false), steel);
-  blade.scale.z = 0.35;
+  const blade = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.030, 6, false), steel);
+  blade.scale.z = 0.42;
   blade.castShadow = true;
   g.add(blade);
   const damask = mesh(torus(0.14, 0.004, Math.PI * 0.9), std(CAT_B.silverShadow, 'silver'), 0.42, 0.09, 0);
@@ -557,7 +590,6 @@ export function buildSultanBigotes() {
     rig.arms[side].elbow.add(fore);
   }
   const ribbons = [];
-
   // silver vambrace on the sword forearm (L is the camera-side arm for the
   // BUY/right-pole side: local -z -> world +z after the yaw-PI flip)
   rig.arms.L.elbow.add(mesh(cyl(0.055, 0.05, 0.11, 10), MB.silver, 0, -0.1, 0));
@@ -569,7 +601,7 @@ export function buildSultanBigotes() {
 
   return {
     ...rig, name: 'SULTAN BIGOTES', side: 'A', facing: Math.PI,
-    sword: scim, swordArm: 'L', ribbons, turban, dish: { skirt }
+    sword: scim, swordArm: 'L', ribbons, turban, dish: { skirt, hem }
   };
 }
 
@@ -592,11 +624,12 @@ const NUM_KEYS = Object.keys(IDLE_TEMPLATE);
 
 // v14: per-move RECOVER lengths (the comic windmill every move ends with).
 // One flat 0.16 s made every move stop the same way; a wrist feint and a full
-// charging lunge visibly do not cost the same effort. Scaled per move below.
+// charging lunge visibly do not cost the same effort.
+// v19: scaled with the longer moves so the release stays proportional.
 const RECOVER_T = {
-  RUSH: 0.30, LUNGE: 0.22, SLASH_UP: 0.20, THRUST: 0.18, SLASH_SPIN: 0.24,
-  RIPOSTE: 0.24, FEINT: 0.10, PARRY_HOP: 0.10, PARRY_BEAT: 0.08, TAUNT: 0.16, HIT: 0.14,
-  SIT_GUARD: 0.12   // v18: standing back up from the seated guard is a settle, not a windmill
+  RUSH: 0.42, LUNGE: 0.32, SLASH_UP: 0.30, THRUST: 0.26, SLASH_SPIN: 0.34,
+  RIPOSTE: 0.34, FEINT: 0.16, PARRY_HOP: 0.16, PARRY_BEAT: 0.13, TAUNT: 0.24, HIT: 0.20,
+  SIT_GUARD: 0.30   // standing up from the seat is a settle, not a windmill
 };
 
 export class DuelCat {
@@ -637,7 +670,9 @@ export class DuelCat {
     st.t += dt;
 
     Object.assign(this.target, IDLE_TEMPLATE);
-    this.target.tailCurl = this.data.side === 'A' ? -1.15 : 0.95;
+    // v19: one shared tail rake for both cats (the old per-side values pointed
+    // one tail behind-down and the other one forward); 1.0 = the alert curve
+    this.target.tailCurl = 1.0;
 
     switch (st.name) {
       case 'RUSH': this._rush(ctx); break;
@@ -667,9 +702,12 @@ export class DuelCat {
       this.setState('RECOVER', RECOVER_T[st.name] || 0.16);
     }
 
-    // smooth toward target pose: v5 settles ~2x faster so short moves read
+    // smooth toward target pose: v5 settles ~2x faster so short moves read.
+    // v19: 26 -> 20 with the longer moves, so a limb carries a little weight
+    // instead of snapping to each new target (the readability pass needs the
+    // arm to travel THROUGH space, not teleport between keyframes).
     const p = this.pose, tg = this.target;
-    const k = 1 - Math.exp(-26 * dt);
+    const k = 1 - Math.exp(-20 * dt);
     for (const key of NUM_KEYS) p[key] = lerp(p[key], tg[key], k);
 
     this._applyPose(dt, ctx);
@@ -718,12 +756,18 @@ export class DuelCat {
     d.legs.L.foot.rotation.z = p.footL;
     d.legs.R.foot.rotation.z = p.footR;
 
-    // tail: curl + counterweight sway (faster when fighting hard)
-    const sway = Math.sin(this.time * 2.6) * p.tailAmp;
+    // tail: v19 - held BEHIND and UP (see TAIL_RAKE in buildRig), arcing up with
+    // a per-segment curl, whipping sideways with the fight. tailCurl is now a
+    // shared 0..1.6 "how raised" factor: 1 = alert, 1.5 = the wrapped guard.
+    const sway = Math.sin(this.time * 2.2) * p.tailAmp;
+    const curl = p.tailCurl;
     d.tail.forEach((seg, i) => {
       const f = i / (d.tail.length - 1);
-      seg.rotation.z = p.tailCurl / d.tail.length + sway * (0.4 + f);
-      seg.rotation.x = Math.sin(this.time * 1.6 + i) * 0.045 - p.lean * 0.4;
+      // upward arc: the bend deepens toward the tip, so the tail sweeps up in a
+      // curve instead of leaving the rump as a rigid stick
+      seg.rotation.z = -(0.055 + f * 0.05) * curl;
+      // lateral whip (rotation.x leaves the tail's own plane): a live tail
+      seg.rotation.x = sway * (0.4 + f) + Math.sin(this.time * 1.6 + i) * 0.03 - p.lean * 0.25;
     });
 
     // ears: micro twitch + flag dart
@@ -742,12 +786,27 @@ export class DuelCat {
     }
     if (d.plume) d.plume.rotation.x = Math.sin(this.time * 3.4) * 0.2;
     if (d.dish) this._dish(d);
+    /* v19 robe hitch: the dishdashah skirt hangs to 0.435 below the hips, i.e.
+     * PAST the rope once the cat is seated, so the whole sit disappeared inside
+     * a bell of cloth (vision review: "his entire lower body is a solid
+     * bell-like structure... looks like he's fused with a stand"). A seated man
+     * hitches his robe; the hem lifts to just above the rope and the folded
+     * legs read again. Eased in and out so standing up is not a pop. */
+    if (d.dish) {
+      const wantHitch = this.state.name === 'SIT_GUARD' ? 1 : 0;
+      this._hitch = lerp(this._hitch === undefined ? 0 : this._hitch, wantHitch, 1 - Math.exp(-6 * dt));
+      const h = this._hitch;
+      d.dish.skirt.scale.y = 1 - 0.42 * h;
+      d.dish.skirt.position.y = -0.165 + 0.105 * h;
+      if (d.dish.hem) d.dish.hem.position.y = -0.425 + 0.185 * h;
+    }
 
     // ---- feet stay ON the rope ----
     // A crouch lowers the hips, and the old code lowered the whole root with
     // it, so the paws sank into the hemp (caught by the vision pass). Measure
     // the actual foot height and lift the root back so the paws rest on the
     // rope surface; while airborne (yOff) the correction is only a nudge.
+    // v19: SIT_GUARD is solved so this correction lands at ~0 - see _sitGuard.
     if (!this._footTmp) this._footTmp = new V3();
     this.root.updateMatrixWorld(true);
     const surf = ropeY + DIM.ropeRadius * 0.5;
@@ -791,22 +850,36 @@ export class DuelCat {
 
   _recover() {
     const f = this.moveFrac;
-    const spin = f * Math.PI * 2.6;
-    this.target.shS_x = 0.5 + Math.sin(spin) * 1.3;
-    this.target.shO_x = 0.5 - Math.sin(spin) * 1.3;
-    this.target.shS_z = -0.3 - Math.cos(spin) * 0.5;
-    this.target.shO_z = -0.3 + Math.cos(spin) * 0.5;
-    this.target.spineLean = 0.1 - Math.sin(f * Math.PI) * 0.26;
-    this.target.tilt = Math.sin(f * Math.PI * 2) * 0.14;
+    // v19: the windmill every move ends with used to span 2.6 PI in 0.16-0.30 s
+    // (up to 50 rad/s of wrist), which was the single fastest thing on screen.
+    // 1.6 PI is still an unmistakable flourish and it is now legible.
+    const spin = f * Math.PI * 1.6;
+    this.target.shS_x = 0.5 + Math.sin(spin) * 1.1;
+    this.target.shO_x = 0.5 - Math.sin(spin) * 1.1;
+    this.target.shS_z = -0.3 - Math.cos(spin) * 0.45;
+    this.target.shO_z = -0.3 + Math.cos(spin) * 0.45;
+    this.target.spineLean = 0.1 - Math.sin(f * Math.PI) * 0.22;
+    this.target.tilt = Math.sin(f * Math.PI * 2) * 0.12;
   }
 
   // charge in: three loud paw stamps (rope gets nudged), then blade first.
   // v14: the charge accelerates (smooth), the skid settles (easeOut).
+  // v19: windup -> swing -> HOLD -> settle (see swingPhases).
   _rush(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
     const reach = s.data.reach || 0.6;
-    if (f < 0.34) {
-      const sf = smooth(f / 0.34);
+    const { p1, p2, p3 } = swingPhases(s, 0.34, 0.70);
+    const drive = (lf) => {
+      tg.xOff = this.fw * lf * reach;
+      tg.spineLean = 0.3 + lf * 0.5;
+      tg.twist = this.fw * 0.18;
+      tg.shO_z = -0.2 - lf * 0.7;
+      tg.shS_z = 1.5 * lf; tg.shS_x = 1.0 * lf; tg.elS = -0.05;
+      tg.headYaw = this.fw * 0.22;
+      tg.yOff = Math.sin(lf * Math.PI) * 0.06;
+    };
+    if (f < p1) {
+      const sf = smooth(f / p1);
       const pulse = Math.abs(Math.sin(sf * Math.PI * 3));
       tg.crouch = 0.06 + pulse * 0.1;
       tg.knL = -0.2 - pulse * 0.5;
@@ -817,18 +890,14 @@ export class DuelCat {
       if (sf > 0.08 && !s.data.st1) { s.data.st1 = 1; ctx.onStamp && ctx.onStamp(this); }
       if (sf > 0.42 && !s.data.st2) { s.data.st2 = 1; ctx.onStamp && ctx.onStamp(this); }
       if (sf > 0.75 && !s.data.st3) { s.data.st3 = 1; ctx.onStamp && ctx.onStamp(this); }
-    } else if (f < 0.7) {
-      const lf = smooth((f - 0.34) / 0.36);
-      tg.xOff = this.fw * lf * reach;
-      tg.spineLean = 0.3 + lf * 0.5;
-      tg.twist = this.fw * 0.18;
-      tg.shO_z = -0.2 - lf * 0.7;
-      tg.shS_z = 1.5 * lf; tg.shS_x = 1.0 * lf; tg.elS = -0.05;
-      tg.headYaw = this.fw * 0.22;
-      tg.yOff = Math.sin(lf * Math.PI) * 0.06;
-      if (lf > 0.35 && !s.data.sp) { s.data.sp = 1; ctx.onLungeHit && ctx.onLungeHit(this); }
+    } else if (f < p2) {
+      const lf = smooth((f - p1) / (p2 - p1));
+      drive(lf);
+      if (lf > 0.55 && !s.data.sp) { s.data.sp = 1; ctx.onLungeHit && ctx.onLungeHit(this); }
+    } else if (f < p3) {
+      drive(1);                                   // HOLD: the charge at full stretch
     } else {
-      const sf = easeOut((f - 0.7) / 0.3);
+      const sf = easeOut((f - p3) / (1 - p3));
       tg.xOff = this.fw * (reach - sf * 0.1);
       tg.spineLean = 0.8 - sf * 0.5;
       tg.tilt = Math.sin(sf * Math.PI) * 0.14;
@@ -840,15 +909,8 @@ export class DuelCat {
   _lunge(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
     const reach = s.data.reach || 0.7;
-    if (f < 0.3) { // coil back, blade drawn - the coil loads slowly (anticipation)
-      const cf = smooth(f / 0.3);
-      tg.crouch = 0.1 * cf;
-      tg.spineLean = -0.12 * cf;
-      tg.shS_z = -0.5 - cf * 0.5; tg.elS = -1.0;
-      tg.knL = -0.2 - cf * 0.35;
-      tg.twist = -this.fw * 0.16 * cf;
-    } else if (f < 0.62) { // explode forward, blade first - fast out of the coil
-      const lf = smooth((f - 0.3) / 0.32);
+    const { p1, p2, p3 } = swingPhases(s, 0.28, 0.62);
+    const extend = (lf) => {
       tg.xOff = this.fw * lf * reach;
       tg.spineLean = 0.25 + lf * 0.55;
       tg.twist = this.fw * 0.2;
@@ -857,9 +919,22 @@ export class DuelCat {
       tg.headYaw = this.fw * 0.24; tg.headPitch = 0.1 * lf;
       tg.yOff = Math.sin(lf * Math.PI) * 0.05;
       tg.thL = 0.06 + lf * 0.5;
-      if (lf > 0.4 && !s.data.sp) { s.data.sp = 1; ctx.onLungeHit && ctx.onLungeHit(this); }
+    };
+    if (f < p1) { // coil back, blade drawn - the coil loads slowly (anticipation)
+      const cf = smooth(f / p1);
+      tg.crouch = 0.1 * cf;
+      tg.spineLean = -0.12 * cf;
+      tg.shS_z = -0.5 - cf * 0.5; tg.elS = -1.0;
+      tg.knL = -0.2 - cf * 0.35;
+      tg.twist = -this.fw * 0.16 * cf;
+    } else if (f < p2) { // explode forward, blade first - fast out of the coil
+      const lf = smooth((f - p1) / (p2 - p1));
+      extend(lf);
+      if (lf > 0.6 && !s.data.sp) { s.data.sp = 1; ctx.onLungeHit && ctx.onLungeHit(this); }
+    } else if (f < p3) { // HOLD: the lunge held at full extension, blade out
+      extend(1);
     } else { // skid - friction, not a wall
-      const sf = easeOut((f - 0.62) / 0.38);
+      const sf = easeOut((f - p3) / (1 - p3));
       tg.xOff = this.fw * (reach - sf * 0.12);
       tg.spineLean = 0.8 - sf * 0.5;
       tg.tilt = Math.sin(sf * Math.PI) * 0.16;
@@ -870,15 +945,8 @@ export class DuelCat {
 
   _slashUp(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
-    if (f < 0.3) { // cape twirl toward the moon - windup gathers (smooth)
-      const cf = smooth(f / 0.3);
-      tg.twist = -0.5 * cf * this.fw * -1;
-      tg.shO_z = -0.2 - cf * 1.5; tg.shO_x = 0.45;
-      tg.headPitch = -0.35 * cf;
-      tg.capeRaise = cf * 0.55;
-      tg.crouch = 0.05 * cf;
-    } else if (f < 0.72) { // rising diagonal slash - crack through fast, settle late
-      const sf = smooth((f - 0.3) / 0.42);
+    const { p1, p2, p3 } = swingPhases(s, 0.30, 0.72);
+    const cut = (sf) => {
       tg.shS_z = -0.75 + sf * 2.5;
       tg.shS_x = -0.5 + sf * 1.2;
       tg.elS = -0.8 + sf * 0.65;
@@ -886,12 +954,27 @@ export class DuelCat {
       tg.twist = (-0.5 + sf * 0.9) * this.fw * -1;
       tg.yOff = Math.sin(sf * Math.PI) * 0.14;
       tg.thL = 0.06 + sf * 0.4;
-      if (sf > 0.4 && !s.data.sl) { s.data.sl = 1; ctx.onSlash && ctx.onSlash(this, 'up'); }
+      tg.capeRaise = 0.35 + sf * 0.3;
+    };
+    if (f < p1) { // cape twirl toward the moon - windup gathers (smooth)
+      const cf = smooth(f / p1);
+      tg.twist = -0.5 * cf * this.fw * -1;
+      tg.shO_z = -0.2 - cf * 1.5; tg.shO_x = 0.45;
+      tg.headPitch = -0.35 * cf;
+      tg.capeRaise = cf * 0.55;
+      tg.crouch = 0.05 * cf;
+    } else if (f < p2) { // rising diagonal slash - crack through, settle late
+      const sf = smooth((f - p1) / (p2 - p1));
+      cut(sf);
+      if (sf > 0.6 && !s.data.sl) { s.data.sl = 1; ctx.onSlash && ctx.onSlash(this, 'up'); }
+    } else if (f < p3) { // HOLD: the top of the arc - the blade hangs there
+      cut(1);
+      tg.headPitch = -0.42;
     } else { // follow-through pose - decelerates into the pose
-      const ff = easeOut((f - 0.72) / 0.28);
+      const ff = easeOut((f - p3) / (1 - p3));
       tg.shS_z = 1.55; tg.elS = -0.18;
       tg.headPitch = -0.42;
-      tg.capeRaise = 0.55 + ff * 0.1;
+      tg.capeRaise = 0.65 + ff * 0.1;
       tg.tilt = -0.1;
     }
   }
@@ -899,24 +982,31 @@ export class DuelCat {
   // v14 NEW (Don Gato): the fencing stop-thrust. A short blade-first poke with
   // almost no travel, fast out, fast back: reads as precise point control next
   // to the big sweeping cuts, and chains after a lunge.
+  // v19: the point now HOLDS at full extension - the classic stop-thrust beat.
   _thrust(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
-    if (f < 0.26) { // guard lifts, weight coils - short, crisp
-      const cf = smooth(f / 0.26);
-      tg.crouch = 0.06 * cf;
-      tg.spineLean = -0.08 * cf;
-      tg.shS_z = -0.4 - cf * 0.2; tg.elS = -1.15;
-      tg.headYaw = -this.fw * 0.08;
-    } else if (f < 0.52) { // the point darts out, arm fully extended
-      const pf = smooth((f - 0.26) / 0.26);
+    const { p1, p2, p3 } = swingPhases(s, 0.30, 0.56);
+    const poke = (pf) => {
       tg.shS_z = -0.6 + pf * 2.25; tg.shS_x = 0.55 * pf;
       tg.elS = -1.15 + pf * 1.13;
       tg.spineLean = -0.08 + pf * 0.5;
       tg.xOff = this.fw * pf * 0.22;
       tg.headYaw = -this.fw * (0.08 - pf * 0.08);
-      if (pf > 0.5 && !s.data.th) { s.data.th = 1; ctx.onThrust && ctx.onThrust(this); }
+    };
+    if (f < p1) { // guard lifts, weight coils - short, crisp
+      const cf = smooth(f / p1);
+      tg.crouch = 0.06 * cf;
+      tg.spineLean = -0.08 * cf;
+      tg.shS_z = -0.4 - cf * 0.2; tg.elS = -1.15;
+      tg.headYaw = -this.fw * 0.08;
+    } else if (f < p2) { // the point darts out, arm fully extended
+      const pf = smooth((f - p1) / (p2 - p1));
+      poke(pf);
+      if (pf > 0.6 && !s.data.th) { s.data.th = 1; ctx.onThrust && ctx.onThrust(this); }
+    } else if (f < p3) { // HOLD: the point parked on the foe
+      poke(1);
     } else { // reprise guard - the arm folds straight back
-      const rf = easeOut((f - 0.52) / 0.48);
+      const rf = easeOut((f - p3) / (1 - p3));
       tg.shS_z = 1.65 - rf * 1.0; tg.elS = -0.02 - rf * 0.6;
       tg.spineLean = 0.42 - rf * 0.3;
       tg.xOff = this.fw * (0.22 - rf * 0.16);
@@ -927,16 +1017,24 @@ export class DuelCat {
   // and flows into a guard: it baits the foe's parry (the director chains it)
   // and reads as ring craft rather than another swing.
   _feint(ctx) {
-    const f = this.moveFrac, tg = this.target;
-    if (f < 0.4) { // sell the lunge - same shape, ~60% of the travel
-      const lf = smooth(f / 0.4);
+    const f = this.moveFrac, tg = this.target, s = this.state;
+    const { p1, p2, p3 } = swingPhases(s, 0.40, 0.62);
+    const bait = (lf) => {
       tg.crouch = 0.05 * lf;
       tg.spineLean = 0.3 * lf;
       tg.shS_z = 0.9 * lf; tg.elS = -0.5 + lf * 0.15;
       tg.xOff = this.fw * lf * 0.18;
       tg.headYaw = this.fw * 0.14 * lf;
+    };
+    if (f < p1) { // sell the lunge - same shape, ~60% of the travel
+      bait(smooth(f / p1));
+    } else if (f < p2) { // the half-lunge reaches its lie
+      bait(smooth((f - p1) / (p2 - p1)));
+    } else if (f < p3) { // HOLD: the blade hangs out there, inviting the answer
+      bait(1);
+      if (!s.data.fn) { s.data.fn = 1; ctx.onFeint && ctx.onFeint(this); }
     } else { // abort: the body settles back, blade stays high and live
-      const ab = easeOut((f - 0.4) / 0.6);
+      const ab = easeOut((f - p3) / (1 - p3));
       tg.crouch = 0.05 - ab * 0.02;
       tg.spineLean = 0.3 - ab * 0.18;
       tg.shS_z = 0.9 - ab * 0.35;
@@ -969,8 +1067,17 @@ export class DuelCat {
 
   _parryHop(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
-    if (f < 0.45) { // two hard sidesteps - steps land on a smooth hop arc
-      const sf = f / 0.45;
+    const { p1, p2, p3 } = swingPhases(s, 0.45, 0.72);
+    const sweep = (pf) => {
+      tg.crouch = 0.11;
+      tg.spineLean = 0.4;
+      tg.shS_z = 0.45 - pf * 0.5; tg.shS_x = -0.6; tg.elS = -1.15;
+      tg.twist = this.fw * (0.28 - pf * 0.35);
+      tg.headPitch = 0.12;
+      tg.xOff = this.fw * 0.2 * pf;
+    };
+    if (f < p1) { // two hard sidesteps - steps land on a smooth hop arc
+      const sf = f / p1;
       const step = Math.sin(sf * Math.PI * 2);
       tg.xOff = -this.fw * step * 0.4;      // lateral: sideways along the rope
       tg.crouch = 0.04 + Math.abs(step) * 0.07;
@@ -979,14 +1086,17 @@ export class DuelCat {
       tg.thR = 0.06 + Math.max(0, -step) * 0.6;
       tg.yOff = Math.abs(step) * 0.08;
       if (sf > 0.4 && !s.data.sd) { s.data.sd = 1; ctx.onStamp && ctx.onStamp(this); }
-    } else { // low blade sweep across - accelerates through, settles at the guard
-      const pf = smooth((f - 0.45) / 0.55);
+    } else if (f < p2) { // low blade sweep across - accelerates through
+      sweep(smooth((f - p1) / (p2 - p1)));
+    } else if (f < p3) { // HOLD: the swept blade parked wide of the body
+      sweep(1);
+    } else { // settle at the guard
+      const pf = easeOut((f - p3) / (1 - p3));
       tg.crouch = 0.11;
       tg.spineLean = 0.4;
-      tg.shS_z = 0.45 - pf * 0.5; tg.shS_x = -0.6; tg.elS = -1.15;
-      tg.twist = this.fw * (0.28 - pf * 0.35);
-      tg.headPitch = 0.12;
-      tg.xOff = this.fw * 0.2 * pf;
+      tg.shS_z = -0.05 - pf * 0.4; tg.shS_x = -0.6 + pf * 0.3; tg.elS = -1.15 + pf * 0.35;
+      tg.twist = this.fw * (-0.07 + pf * 0.05);
+      tg.xOff = this.fw * 0.2 * (1 - pf * 0.5);
     }
   }
 
@@ -995,16 +1105,26 @@ export class DuelCat {
   // answer to a feint, which then chains into the riposte.
   _parryBeat(ctx) {
     const f = this.moveFrac, tg = this.target, s = this.state;
-    if (f < 0.3) { // the beat: blade flicks across fast, body stays home
-      const bf = smooth(f / 0.3);
+    const { p1, p2, p3 } = swingPhases(s, 0.34, 0.58);
+    const beat = (bf) => {
       tg.shS_z = -0.5 + bf * 1.35;
       tg.elS = -0.9 + bf * 0.75;
       tg.shS_x = -0.2 + bf * 0.35;
       tg.crouch = 0.03;
       tg.headYaw = this.fw * 0.06;
-      if (bf > 0.55 && !s.data.bt) { s.data.bt = 1; ctx.onBeat && ctx.onBeat(this); }
+    };
+    if (f < p1) { // the beat: blade flicks across, body stays home
+      const bf = smooth(f / p1);
+      beat(bf);
+      if (bf > 0.7 && !s.data.bt) { s.data.bt = 1; ctx.onBeat && ctx.onBeat(this); }
+    } else if (f < p2) {
+      const bf = smooth((f - p1) / (p2 - p1));
+      beat(bf);
+      if (bf > 0.9 && !s.data.bt2) { s.data.bt2 = 1; ctx.onBeat && ctx.onBeat(this); }
+    } else if (f < p3) { // HOLD: the flat pressed hard against the foe's blade
+      beat(1);
     } else { // recover the line: blade draws back to guard
-      const rf = easeOut((f - 0.3) / 0.7);
+      const rf = easeOut((f - p3) / (1 - p3));
       tg.shS_z = 0.85 - rf * 1.3;
       tg.elS = -0.15 - rf * 0.5;
       tg.shS_x = 0.15;
@@ -1013,82 +1133,118 @@ export class DuelCat {
   }
 
   // v18: the seated sword guard (user: "sit down and defend with his sword").
-  // A POSTURE, not a strike: the cat drops his haunches onto the rope, seat
-  // low, sword arm raised in a closed high guard, off arm braced, tail
-  // wrapped, ears back. The director renews it while the tape stays against
-  // him; hold-breathing keeps it alive without looking frozen.
+  // A POSTURE, not a strike: the cat drops onto the rope, sword arm raised in a
+  // closed high guard, off arm braced, tail up out of the way.
+  // v19: he now really SITS - the seat (the underside of the pelvis) is placed
+  // on the rope and the legs hang over the front of it, one either side, the way
+  // you sit on a rope. The old version only crouched 0.30, which the foot-plant
+  // correction then cancelled out (it lifts the root to keep the paws on the rope,
+  // measured clamp +0.18), so the pose never actually reached the rope: that is
+  // why the user still saw a standing cat. SIT_GUARD now skips the foot
+  // correction (see _applyPose) and the crouch below is solved for the pelvis.
   _sitGuard(ctx) {
     const tg = this.target, t = this.time;
-    const breathe = Math.sin(t * 1.9) * 0.03;
-    const guardUp = Math.sin(t * 2.4) * 0.06;
-    tg.crouch = 0.30 + breathe;                    // the seat: deep haunch drop
-    tg.spineLean = -0.10 + breathe * 0.4;          // upright under the guard
-    tg.headPitch = 0.10;                           // eyes on the foe, chin down
-    tg.headYaw = -this.fw * 0.12;
-    tg.shS_z = 1.15 + guardUp;                     // sword arm UP in the guard
-    tg.shS_x = 0.30;
-    tg.elS = -1.25 + guardUp;                      // closed: point stays high
-    tg.shO_z = -0.55;                              // off arm braced across
-    tg.shO_x = 0.35;
-    tg.elO = -0.9;
-    tg.knL = -0.85; tg.knR = -0.85;                // haunches folded
-    tg.thL = 0.42; tg.thR = 0.42;                  // thighs forward, sitting
-    tg.footL = 0.25; tg.footR = 0.25;
-    tg.tailCurl = (this.data.side === 'A' ? -1.15 : 0.95) * 1.5;  // wrapped tail
-    tg.tailAmp = 0.04;
+    const breathe = Math.sin(t * 1.9) * 0.022;
+    const guardUp = Math.sin(t * 2.4) * 0.05;
+    const sway = Math.sin(t * 1.3) * 0.02;
+    tg.crouch = 0.28 + breathe;                    // seat solved so corr ~= 0
+    tg.spineLean = 0.10 + breathe * 0.5;           // upright under the guard
+    tg.tilt = sway;                                // a little live weight shift
+    tg.headPitch = 0.12;                           // eyes on the foe, chin down
+    tg.headYaw = -this.fw * 0.14;
+    tg.shS_z = 1.45 + guardUp;                     // sword arm UP: a high guard
+    tg.shS_x = 0.55;
+    tg.elS = -1.35 + guardUp;                      // closed: the point stays high
+    tg.shO_z = -0.70;                              // off arm braced forward
+    tg.shO_x = 0.60;
+    tg.elO = -1.10;
+    // THE SEAT is the leg fold, not a root drop: with the planted-paw pass in
+    // _applyPose the root height is DERIVED from where the paws land, so folding
+    // the haunch is what actually lowers the body (measured: th 1.25 / kn -2.60
+    // puts the paws on the rope and the hips 0.26 above it, against 0.50 standing)
+    tg.thL = 1.25; tg.thR = 1.25;                  // thighs forward and down
+    tg.knL = -2.60; tg.knR = -2.60;                // shanks folded back under
+    tg.footL = 0.30; tg.footR = 0.30;
+    tg.capeRaise = 0.45;                           // clear the cape off the seat
+    tg.tailCurl = 1.55;                            // wrapped up out of the way
+    tg.tailAmp = 0.03;
     tg.earSwivel = 0;
     // a guarded cat still TRACKS the flag with his ears
     if (ctx.flagDart) tg.headYaw += -this.fw * 0.1;
   }
 
   _slashSpin(ctx) {
-    const f = this.moveFrac, tg = this.target;
-    if (f < 0.45) { // scimitar windmill x2 overhead - starts slow, whips up
-      const wf = smooth(f / 0.45);
-      tg.shS_z = -0.7 + wf * Math.PI * 4;
+    const f = this.moveFrac, tg = this.target, s = this.state;
+    const { p1, p2, p3 } = swingPhases(s, 0.42, 0.80);
+    if (f < p1) { // scimitar windmill overhead - starts slow, whips up
+      const wf = smooth(f / p1);
+      // v19: ONE full revolution, ending congruent with where the cuts begin.
+      // The old 2-turn windmill ended 10 rad away from the next phase's angle,
+      // so the pose lerp unwound all of it in ~0.2 s: a second, opposite blur.
+      tg.shS_z = -0.7 + wf * (2.15 + Math.PI * 2);
       tg.elS = -0.2;
       tg.spineLean = -0.12;
       tg.headPitch = -0.24;
       tg.twist = wf * 0.5 * this.fw;
       tg.yOff = Math.sin(wf * Math.PI) * 0.1;
-      if (wf > 0.3 && !this.state.data.w1) { this.state.data.w1 = 1; ctx.onWhoosh && ctx.onWhoosh(this); }
-    } else { // triple downward cuts - each cut eases in and settles
-      const cf = (f - 0.45) / 0.55;
-      const chop = Math.abs(Math.sin(cf * Math.PI * 3));
+      if (wf > 0.3 && !s.data.w1) { s.data.w1 = 1; ctx.onWhoosh && ctx.onWhoosh(this); }
+    } else if (f < p2) { // two downward cuts - each one eases in and settles
+      const cf = (f - p1) / (p2 - p1);
+      const chop = Math.abs(Math.sin(cf * Math.PI * 2));
       tg.shS_z = 1.45 - chop * 1.85;
       tg.elS = -0.35;
       tg.spineLean = 0.15 + chop * 0.28;
       tg.crouch = 0.05 + chop * 0.09;
       tg.xOff = this.fw * 0.3 * easeOut(cf);
-      if (cf > 0.25 && !this.state.data.c1) { this.state.data.c1 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
-      if (cf > 0.72 && !this.state.data.c2) { this.state.data.c2 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
+      if (cf > 0.2 && !s.data.c1) { s.data.c1 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
+      if (cf > 0.7 && !s.data.c2) { s.data.c2 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
+    } else if (f < p3) { // HOLD: the blade driven down and parked at the bottom
+      tg.shS_z = -0.4; tg.elS = -0.35;
+      tg.spineLean = 0.43;
+      tg.crouch = 0.14;
+      tg.headPitch = 0.18;
+      tg.xOff = this.fw * 0.3;
+      if (!s.data.c3) { s.data.c3 = 1; ctx.onSlash && ctx.onSlash(this, 'down'); }
+    } else { // draw the blade back up to the guard
+      const rf = easeOut((f - p3) / (1 - p3));
+      tg.shS_z = -0.4 + rf * 0.1;
+      tg.elS = -0.35 - rf * 0.4;
+      tg.spineLean = 0.43 - rf * 0.3;
+      tg.crouch = 0.14 - rf * 0.1;
+      tg.xOff = this.fw * 0.3 * (1 - rf * 0.5);
     }
   }
 
   _riposte(ctx) {
-    const f = this.moveFrac, tg = this.target;
-    if (f < 0.22) { // duck under the thrust - the drop quickens into the dip
-      const df = smooth(f / 0.22);
-      tg.crouch = 0.24 * df;
-      tg.spineLean = 0.55 * df;
-      tg.headPitch = 0.24;
-      tg.knL = -0.2 - df * 0.5; tg.knR = -0.2 - df * 0.5;
-    } else if (f < 0.46) { // whirl behind the foe - spins up fast, lands soft
-      const wf = (f - 0.22) / 0.24;
-      tg.twist = Math.sin(smooth(wf) * Math.PI) * 1.9 * this.fw;
-      tg.crouch = 0.14;
-      tg.shS_z = -1.3;
-      tg.xOff = -this.fw * Math.sin(wf * Math.PI) * 0.3;
-    } else if (f < 0.74) { // crescent slash arc - drawn through with intent
-      const cf = smooth((f - 0.46) / 0.28);
+    const f = this.moveFrac, tg = this.target, s = this.state;
+    const { p1, p2, p3 } = swingPhases(s, 0.44, 0.74);
+    const crescent = (cf) => {
       tg.shS_z = -1.5 + cf * 2.7;
       tg.shS_x = -1.0 + cf * 0.7;
       tg.elS = -0.25;
       tg.twist = this.fw * (0.35 - cf * 0.6);
       tg.xOff = this.fw * 0.35 * cf;
-      if (cf > 0.4 && !this.state.data.cr) { this.state.data.cr = 1; ctx.onSlash && ctx.onSlash(this, 'crescent'); }
+    };
+    if (f < 0.18) { // duck under the thrust - the drop quickens into the dip
+      const df = smooth(f / 0.18);
+      tg.crouch = 0.24 * df;
+      tg.spineLean = 0.55 * df;
+      tg.headPitch = 0.24;
+      tg.knL = -0.2 - df * 0.5; tg.knR = -0.2 - df * 0.5;
+    } else if (f < 0.36) { // whirl behind the foe - spins up fast, lands soft
+      const wf = (f - 0.18) / 0.18;
+      tg.twist = Math.sin(smooth(wf) * Math.PI) * 1.9 * this.fw;
+      tg.crouch = 0.14;
+      tg.shS_z = -1.3;
+      tg.xOff = -this.fw * Math.sin(wf * Math.PI) * 0.3;
+    } else if (f < p2) { // crescent slash arc - drawn through with intent
+      const cf = smooth((f - 0.36) / (p2 - 0.36));
+      crescent(cf);
+      if (cf > 0.55 && !s.data.cr) { s.data.cr = 1; ctx.onSlash && ctx.onSlash(this, 'crescent'); }
+    } else if (f < p3) { // HOLD: the crescent parked across the foe's line
+      crescent(1);
     } else { // counter-thrust - settles into the extension
-      const pf = easeOut((f - 0.74) / 0.26);
+      const pf = easeOut((f - p3) / (1 - p3));
       tg.spineLean = 0.4;
       tg.shS_z = 1.6; tg.elS = -0.08;
       tg.xOff = this.fw * (0.35 + pf * 0.45);

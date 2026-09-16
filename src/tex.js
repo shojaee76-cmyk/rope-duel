@@ -258,7 +258,7 @@ export function leatherTexture(opts = {}) {
 }
 
 // ---------- stone (walls, poles, basins) ----------
-export function stoneCanvas({ seed = 21, base = '#ffffff', blocks = 4, alpha = 0.22, speckle = 1200, size = 256 } = {}) {
+export function stoneCanvas({ seed = 21, base = '#ffffff', blocks = 4, alpha = 0.22, speckle = 1200, size = 512 } = {}) {
   const { c, g } = surface(size, base);
   const rnd = prng(seed);
   const bh = size / blocks;
@@ -271,6 +271,33 @@ export function stoneCanvas({ seed = 21, base = '#ffffff', blocks = 4, alpha = 0
       const t = rnd();
       g.fillStyle = t < 0.35 ? 'rgba(255,255,255,0.10)' : t < 0.7 ? 'rgba(120,96,70,0.10)' : 'rgba(255,246,232,0.06)';
       g.fillRect(x, r * bh, size / blocks, bh);
+      // v19: each block gets a soft internal gradient (light from above) so the
+      // courses read as rounded stone blocks rather than flat rectangles
+      const bg = g.createLinearGradient(0, r * bh, 0, r * bh + bh);
+      bg.addColorStop(0, 'rgba(255,250,238,0.10)');
+      bg.addColorStop(0.55, 'rgba(255,255,255,0)');
+      bg.addColorStop(1, 'rgba(48,36,24,0.10)');
+      g.fillStyle = bg;
+      g.fillRect(x, r * bh, size / blocks, bh);
+      // pit + chisel marks specific to this block
+      for (let i = 0; i < 12; i++) {
+        const px = x + rnd() * (size / blocks), py = r * bh + rnd() * bh;
+        const pr = 2 + rnd() * 7;
+        const pg = g.createRadialGradient(px, py, 0, px, py, pr);
+        pg.addColorStop(0, 'rgba(56,42,28,0.24)');
+        pg.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = pg;
+        g.beginPath(); g.arc(px, py, pr, 0, Math.PI * 2); g.fill();
+      }
+      for (let i = 0; i < 4; i++) {
+        g.strokeStyle = 'rgba(90,72,52,0.14)';
+        g.lineWidth = 1 + rnd() * 1.5;
+        g.beginPath();
+        const cx = x + rnd() * (size / blocks), cy = r * bh + rnd() * bh;
+        g.moveTo(cx, cy);
+        g.lineTo(cx + (rnd() - 0.5) * 34, cy + (rnd() - 0.5) * 12);
+        g.stroke();
+      }
     }
   }
   // joints: recessed dark line with a light catch on the lower edge
@@ -288,28 +315,37 @@ export function stoneCanvas({ seed = 21, base = '#ffffff', blocks = 4, alpha = 0
       g.strokeStyle = `rgba(58,44,32,${alpha + 0.12})`;
       g.lineWidth = 3;
       g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + bh); g.stroke();
+      g.strokeStyle = 'rgba(255,248,236,0.12)';
+      g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(x + 2.2, y); g.lineTo(x + 2.2, y + bh); g.stroke();
     }
   }
-  for (let i = 0; i < speckle; i++) {
-    const x = rnd() * size, y = rnd() * size, s = 0.6 + rnd() * 2.2;
+  for (let i = 0; i < speckle * 2; i++) {
+    const x = rnd() * size, y = rnd() * size, s = 0.6 + rnd() * 2.6;
     g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.16)' : 'rgba(48,36,26,0.18)';
     g.fillRect(x, y, s, s);
   }
   // weathering streaks + pitting
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 26; i++) {
     const x = rnd() * size;
     g.strokeStyle = 'rgba(70,54,38,0.12)';
-    g.lineWidth = 2 + rnd() * 6;
-    g.beginPath(); g.moveTo(x, 0); g.lineTo(x + (rnd() - 0.5) * 20, size); g.stroke();
+    g.lineWidth = 2 + rnd() * 8;
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x + (rnd() - 0.5) * 30, size); g.stroke();
   }
-  for (let i = 0; i < 26; i++) {
-    const x = rnd() * size, y = rnd() * size, r = 2 + rnd() * 7;
+  for (let i = 0; i < 48; i++) {
+    const x = rnd() * size, y = rnd() * size, r = 2 + rnd() * 9;
     const grd = g.createRadialGradient(x, y, 0, x, y, r);
     grd.addColorStop(0, 'rgba(60,46,32,0.22)');
     grd.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = grd;
     g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
   }
+  // v19 damp: the base of a courtyard wall is always darker and greener
+  const damp = g.createLinearGradient(0, size * 0.62, 0, size);
+  damp.addColorStop(0, 'rgba(40,52,36,0)');
+  damp.addColorStop(1, 'rgba(38,50,34,0.20)');
+  g.fillStyle = damp;
+  g.fillRect(0, size * 0.62, size, size * 0.38);
   return c;
 }
 

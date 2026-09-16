@@ -59,7 +59,9 @@ const geo = await page.evaluate(() => {
   const copingFront = -7.2 + 0.02 + 0.62 / 2;
   return {
     boardFront: b.z + 0.09, boardBack: b.z - 0.09, boardY: b.y, boardW: b.w,
+    boardFace: b.face, screenGap: b.gap, screenZ: b.screenZ,
     chartPlaneZ: window.__duelPage.chart.stats().position ? window.__duelPage.chart.stats().position[2] : null,
+    chartMount: window.__duelPage.chart.stats().mount,
     wallFace, copingFront,
     gapVsCoping: (b.z - 0.09) - copingFront,
     gapVsWall: (b.z - 0.09) - wallFace,
@@ -70,9 +72,24 @@ check('board back is PROUD of the coping front (no slice-through)',
   geo.gapVsCoping >= 0.02, `gap ${geo.gapVsCoping.toFixed(3)} (board back ${geo.boardBack.toFixed(2)} vs coping ${geo.copingFront.toFixed(2)})`);
 check('board back is PROUD of the wall face (shadow gap >= 0.05)',
   geo.gapVsWall >= 0.05, `gap ${geo.gapVsWall.toFixed(3)}`);
-check('chart plane sits just in front of the board face (no z-fight)',
-  Math.abs(geo.chartPlaneZ - geo.boardFront) < 0.02,
-  `plane z ${geo.chartPlaneZ?.toFixed(3)} vs board front ${geo.boardFront.toFixed(3)}`);
+/* v19 THE MOUNT CONTRACT (user: "the chart is still embeded infused to the board
+ * behind it and they collide to each other"). The old assertion demanded the
+ * chart plane sit within 0.02 of the board face - i.e. it PROVED the coplanar
+ * z-fight the user was complaining about. A mounted screen is a box standing
+ * proud: assert a real air gap, that the glass is not coplanar, and that the
+ * whole assembly still hangs on the board rather than floating in the room. */
+check('chart glass stands PROUD of the board face (isolation gap >= 0.10)',
+  geo.chartMount && geo.chartMount.proudBy >= 0.10,
+  `glass z ${geo.chartPlaneZ?.toFixed(3)} vs board face ${geo.boardFace?.toFixed(3)} -> proud by ${geo.chartMount?.proudBy}`);
+check('chart glass is NOT coplanar with the board face (no z-fight)',
+  geo.chartMount && geo.chartMount.proudBy >= 0.05,
+  `proud by ${geo.chartMount?.proudBy}`);
+check('screen assembly stays on the board (glass within 0.40 of the face)',
+  geo.chartMount && geo.chartMount.proudBy <= 0.40,
+  `proud by ${geo.chartMount?.proudBy}`);
+check('an air gap exists between the board face and the bezel back',
+  geo.chartMount && geo.chartMount.proudBy - 0.10 >= 0.02,
+  `gap ${(geo.chartMount?.proudBy - 0.10).toFixed(3)} (bezel depth 0.10)`);
 check('board is inside the blanked centre (trim clear of piers at x 4.1)',
   geo.boardW / 2 + 0.05 <= 4.1, `half+trim ${(geo.boardW / 2 + 0.05).toFixed(2)} vs pier face 4.10`);
 const shot = await page.screenshot({ path: path.join(root, 'tools/shots/wallboard.png') });

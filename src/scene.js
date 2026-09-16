@@ -128,6 +128,7 @@ export function createDuelScene(container, opts = {}) {
   const shake = { t: 0, amp: 0 };
   let slowmo = 0;
   let camPan = 0;
+  const CAM_FOLLOW = 0.62;   // v19: how much of the pair's travel the camera takes
   let camPush = 0;      // smoothed brawl push-in
   let heat = 0;         // 0..1 fight heat (drives crowd + camera energy)
   // scratch vectors: the fight code used to allocate 4-6 Vector3s per frame
@@ -140,6 +141,10 @@ export function createDuelScene(container, opts = {}) {
   // that follows the sword tip for ~0.22 s and fades. One pooled geometry per
   // cat, N points ring buffer, additive; zero allocation per frame.
   const TRAIL_N = 22;
+  /* v19: the arc lives longer (0.22 -> 0.34 s) and the emit window covers more
+   * of the swing. With the moves now ~1.7x longer the arc still has to read as
+   * one continuous line rather than a dotted flicker. */
+  const TRAIL_LIFE = 0.34;
   function makeTrail(cat) {
     const geo = new THREE.BufferGeometry();
     const pos = new Float32Array(TRAIL_N * 3);
@@ -174,7 +179,7 @@ export function createDuelScene(container, opts = {}) {
         this.pos[k * 3] = p.x; this.pos[k * 3 + 1] = p.y; this.pos[k * 3 + 2] = p.z;
       },
       update(dt) {
-        const life = 0.22;
+        const life = TRAIL_LIFE;
         for (let i = 0; i < TRAIL_N; i++) {
           if (this.age[i] > life) { this.col[i * 3] = this.col[i * 3 + 1] = this.col[i * 3 + 2] = 0; continue; }
           this.age[i] += dt;
@@ -335,6 +340,8 @@ export function createDuelScene(container, opts = {}) {
   // demo tape stops, the director idles, and the pair is pinned to given x
   // positions so screenshots are comparable frame to frame.
   const freezeCtl = { armed: false, ax: 1.1, bx: -1.1 };
+  // camera pin for framing shots / checkers (tools/wallshot.mjs, webgl proofs)
+  const camLock = { on: false, px: 0, py: 3.6, pz: 12.6, tx: 0, ty: 3.0, tz: -2 };
 
   const api = {
     setPressure(P) {
@@ -574,7 +581,7 @@ export function createDuelScene(container, opts = {}) {
         const n = cat.state.name;
         if (n === 'LUNGE' || n === 'RUSH' || n === 'SLASH_UP' || n === 'SLASH_SPIN' || n === 'RIPOSTE' || n === 'THRUST') {
           const st = cat.state, dur = st.dur || 1;
-          if (st.t > dur * 0.2 && st.t < dur * 0.75) (cat.data.side === 'A' ? trailA : trailB).emit(cat.bladeTipWorld(_tip));
+          if (st.t > dur * 0.15 && st.t < dur * 0.85) (cat.data.side === 'A' ? trailA : trailB).emit(cat.bladeTipWorld(_tip));
         }
       }
     }
@@ -640,17 +647,27 @@ export function createDuelScene(container, opts = {}) {
     else shake.amp = 0;
     const s = (shk / 0.16) * shake.amp;
     const centre = (catA.x + catB.x) * 0.5;
-    camPan += (centre - camPan) * Math.min(1, dt * 3.2);
+    /* v19 PRICE LANE: the camera now follows only 0.62 of the pair's travel, so
+     * the lane's slide is VISIBLE on screen instead of being cancelled by the
+     * pan (at 1.0 the camera glued the pair to the centre and a 3-unit lane move
+     * looked like nothing happened). Asserted by tools/lanecheck.mjs. */
+    camPan += (centre * CAM_FOLLOW - camPan) * Math.min(1, dt * 3.2);
     // the zoom rides the same smoothed intensity (was: a binary flag chased at
     // dt*2.6, which reversed direction ~4x as often)
     camPush += (brawl - camPush) * Math.min(1, dt * 1.4);
     const idleDriftX = Math.sin(simTime * 0.09) * 0.18;
-    camera.position.set(
-      camPan + idleDriftX + (Math.random() - 0.5) * s + amb.mouse.x * 0.5,
-      2.55 + Math.sin(simTime * 0.06) * 0.1 + (Math.random() - 0.5) * s - amb.mouse.y * 0.3 + camPush * 0.16,
-      6.8 - camPush * 0.55
-    );
-    camera.lookAt(camPan * 0.9, 3.15 - camPush * 0.1, 0);
+    if (camLock.on) {
+      // verification hook (tools/wallshot.mjs): pin the camera for framing shots
+      camera.position.set(camLock.px, camLock.py, camLock.pz);
+      camera.lookAt(camLock.tx, camLock.ty, camLock.tz);
+    } else {
+      camera.position.set(
+        camPan + idleDriftX + (Math.random() - 0.5) * s + amb.mouse.x * 0.5,
+        2.55 + Math.sin(simTime * 0.06) * 0.1 + (Math.random() - 0.5) * s - amb.mouse.y * 0.3 + camPush * 0.16,
+        6.8 - camPush * 0.55
+      );
+      camera.lookAt(camPan * 0.9, 3.15 - camPush * 0.1, 0);
+    }
 
     // ---- v15 moon slot: screen-fixed park, opposite the sky tape panel ----
     // The moon keeps a PARTIAL parallax (it follows `par` of the camera pan) so
@@ -686,6 +703,15 @@ export function createDuelScene(container, opts = {}) {
       rope, flag, director, catA, catB, arena, vfx, camera, renderer, crowd, hooksTrade, gov, contact, skyChart,
       quality: () => ({ ratio: gov.ratio, base: gov.base, step: gov.step, med: gov.med, changes: gov.changes, on: gov.on, fails: gov.fails, lock: gov.lock }),
       heat: () => heat,
+      // v19: the price lane as the HUD scale reads it
+      lane: () => director.laneState(),
+      camPan: () => camPan,
+      // pin the camera for framing shots: lockCamera(true, px,py,pz, tx,ty,tz)
+      lockCamera: (on, px = 0, py = 3.6, pz = 12.6, tx = 0, ty = 3.0, tz = -2) => {
+        camLock.on = !!on;
+        camLock.px = px; camLock.py = py; camLock.pz = pz;
+        camLock.tx = tx; camLock.ty = ty; camLock.tz = tz;
+      },
       freeze: (armed, ax = 1.1, bx = -1.1) => {
         freezeCtl.armed = !!armed; freezeCtl.ax = ax; freezeCtl.bx = bx;
         demo.on = false;

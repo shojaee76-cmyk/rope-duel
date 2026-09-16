@@ -279,6 +279,42 @@
     74% { opacity: 0.92; }
     100% { opacity: 0; transform: translateY(-68px) scale(0.97); } }
 
+  /* ---------- v19 price lane: where the duel sits along the rope ----------
+     The cats' left/right movement is driven by the BTC tape (30 s change), and
+     an invisible cause is a bad one: this scale names the input, shows the last
+     30 s change, and slides a marker to where the pair actually is. */
+  #lane { position: fixed; bottom: 16px; left: 50%; translate: -50% 0; z-index: 10;
+    width: min(46vw, 430px); padding: 6px 6px 7px; border-radius: 18px;
+    background: var(--plate); border: 1px solid var(--hairline);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    animation: ui-in 0.7s var(--ease-out) 0.34s backwards; }
+  #lane .lane-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin: 0 4px 5px; }
+  #lane .lane-label { font: 500 8.5px/1 var(--font-data); letter-spacing: 0.24em;
+    color: var(--ink-faint); text-transform: uppercase; white-space: nowrap; }
+  #lane .lane-label b { color: var(--ink-dim); font-weight: 700; }
+  #lane-pct { font: 700 10.5px/1 var(--font-data); font-variant-numeric: tabular-nums;
+    letter-spacing: 0.06em; }
+  #lane .lane-track { position: relative; height: 14px; border-radius: 8px;
+    background: linear-gradient(90deg, rgba(239, 83, 80, 0.30) 0%, rgba(120, 124, 150, 0.12) 50%, rgba(53, 208, 127, 0.30) 100%);
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.05);
+    overflow: hidden; }
+  #lane .lane-edge { position: absolute; top: 0; bottom: 0; display: flex; align-items: center;
+    font: 700 7.5px/1 var(--font-data); letter-spacing: 0.2em; opacity: 0.75; }
+  #lane .lane-edge.sell { left: 8px; color: var(--sell-bright); }
+  #lane .lane-edge.buy { right: 8px; color: var(--buy-bright); }
+  #lane .lane-mid { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+    background: rgba(255, 255, 255, 0.5); }
+  #lane .lane-mark { position: absolute; top: 50%; left: 50%; width: 9px; height: 9px;
+    margin: -4.5px 0 0 -4.5px; background: var(--gold); border-radius: 1.5px;
+    transform: rotate(45deg); transition: left 0.4s var(--ease-out);
+    box-shadow: 0 0 10px 2px rgba(245, 197, 66, 0.55); }
+  #lane .lane-cat { position: absolute; top: 50%; width: 5px; height: 5px; margin-top: -2.5px;
+    border-radius: 50%; opacity: 0.9; transition: left 0.4s var(--ease-out); }
+  #lane .lane-cat.b { background: var(--buy-bright); box-shadow: 0 0 7px rgba(53, 208, 127, 0.8); }
+  #lane .lane-cat.s { background: var(--sell-bright); box-shadow: 0 0 7px rgba(255, 138, 128, 0.8); }
+
   /* ---------- WebGL fallback ---------- */
   #nogl { position: fixed; inset: 0; z-index: 50; display: none;
     align-items: center; justify-content: center; background: #05060F;
@@ -321,6 +357,8 @@
     .callout { font-size: 12px; padding: 6px 10px; border-radius: 10px; }
     .callout .head { font-size: 12px; }
     .callout.whale { font-size: 14px; }
+    #lane { width: 86vw; bottom: 44px; padding: 5px; border-radius: 14px; }
+    #lane .lane-head { margin-bottom: 4px; }
   }
   @media (max-width: 420px) {
     #hud .hud-cell:last-child { display: none; } /* trades/s yields room */
@@ -334,9 +372,10 @@
     .plate { top: 42%; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #brand, #hud, #meter, #status, #tag-buy, #tag-sell { animation: none; }
+    #brand, #hud, #meter, #status, #tag-buy, #tag-sell, #lane { animation: none; }
     #status-dot.live, #meter-duel.act i, .callout, .callout.whale::after { animation: none; }
     #meter-buy, #meter-sell, .plate-momentum i { transition-duration: 0.01s; }
+    #lane .lane-mark, #lane .lane-cat { transition-duration: 0.01s; }
   }
 </style>
 </head>
@@ -403,6 +442,21 @@
     <div class="plate-role">BUY PRESSURE</div>
     <div class="plate-momentum"><i id="mom-buy"></i></div>
     <div class="plate-state" id="state-buy">EN GARDE</div>
+  </div>
+</div>
+
+<div id="lane" aria-label="price lane: the duel's position along the rope follows the BTC tape">
+  <div class="lane-head">
+    <span class="lane-label"><b>PRICE LANE</b> &middot; 30s BTC</span>
+    <span id="lane-pct">&mdash;</span>
+  </div>
+  <div class="lane-track">
+    <span class="lane-edge sell">SELL</span>
+    <span class="lane-edge buy">BUY</span>
+    <i class="lane-mid"></i>
+    <i class="lane-cat s" id="lane-cat-s"></i>
+    <i class="lane-cat b" id="lane-cat-b"></i>
+    <i class="lane-mark" id="lane-mark"></i>
   </div>
 </div>
 

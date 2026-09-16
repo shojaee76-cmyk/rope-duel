@@ -76,6 +76,40 @@ export function createSkyChart(scene, camera, opts = {}) {
 
   const group = new THREE.Group();
   group.add(mesh);
+
+  /* ---------- v19 the SCREEN (bezel + body) ----------
+   * (user: "the chart is still embeded infused to the board behind it and they
+   * collide to each other"). The glass used to be a bare plane placed exactly on
+   * the board's front face; a screen mounted on a display board is a BOX: a dark
+   * metal bezel around the glass and a body behind it, standing off the walnut on
+   * brass pins (arena.js builds the pins). The four rails are unit boxes scaled
+   * in layout(), so the frame tracks every viewport relayout. */
+  const FRAME_D = 0.10;        // must match SCREEN_DEPTH in arena.js
+  const RAIL = 0.075;          // bezel rail thickness
+  const frameMat = new THREE.MeshStandardMaterial({ color: '#14161E', metalness: 0.6, roughness: 0.4 });
+  const bezel = new THREE.Group();
+  const rails = [0, 1, 2, 3].map(() => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), frameMat);
+    m.frustumCulled = false;
+    bezel.add(m);
+    return m;
+  });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), frameMat);
+  body.frustumCulled = false;
+  bezel.add(body);
+  group.add(bezel);
+  function layScreen(cx, cy, z, w, h) {
+    const railZ = z + FRAME_D * 0.5;
+    const put = (m, sx, sy, sz, px, py, pz) => {
+      m.scale.set(sx, sy, sz);
+      m.position.set(px, py, pz);
+    };
+    put(rails[0], w + RAIL * 2, RAIL, FRAME_D, cx, cy + h / 2 + RAIL / 2, railZ);
+    put(rails[1], w + RAIL * 2, RAIL, FRAME_D, cx, cy - h / 2 - RAIL / 2, railZ);
+    put(rails[2], RAIL, h, FRAME_D, cx - w / 2 - RAIL / 2, cy, railZ);
+    put(rails[3], RAIL, h, FRAME_D, cx + w / 2 + RAIL / 2, cy, railZ);
+    put(body, w + 0.01, h + 0.01, FRAME_D * 0.55, cx, cy, z - FRAME_D * 0.22);
+  }
   scene.add(group);
 
   let variant = opts.variant || 'slab';
@@ -101,21 +135,28 @@ export function createSkyChart(scene, camera, opts = {}) {
     const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist;
     const halfW = halfH * camera.aspect;
     // fit: on narrow viewports the visible wall slice is narrower than the
-    // board, so the plane shrinks to 92% of the visible slice (the walnut
-    // board behind it is world-fixed and bleeds off-frame, as real walls do)
+    // board, so the plane shrinks to 88% of the visible slice (the walnut board
+    // behind it is world-fixed and bleeds off-frame, as real walls do).
+    // v19: 0.88 of the BOARD too (was 0.92), so the walnut frame shows as a real
+    // margin around the bezel instead of the screen covering the whole board.
     const b = opts.board;
-    const w = Math.min(WALL.w, b ? b.w * 0.92 : WALL.w, halfW * 2 * 0.92);
+    const w = Math.min(WALL.w, b ? b.w * 0.88 : WALL.w, halfW * 2 * 0.88);
     const h = WALL.h * (w / WALL.w);
     mesh.geometry.dispose();
     mesh.geometry = new THREE.PlaneGeometry(w, h);
-    // hang ON the board: its centre height, 0.09 in front of its face
-    mesh.position.set(WALL.cx, b ? b.y : WALL.cy, b ? b.z + 0.09 : WALL.z);
+    // hang ON the board: its centre height, standing PROUD of its face on the
+    // mount stack arena.js builds (face -> gap -> bezel depth -> glass)
+    const sz = b ? (b.screenZ !== undefined ? b.screenZ : b.z + 0.09) : WALL.z;
+    mesh.position.set(WALL.cx, b ? b.y : WALL.cy, sz);
+    layScreen(WALL.cx, b ? b.y : WALL.cy, sz, w, h);
 
     // canvas resolution ~1:1 with the projected board, clamped so a phone is
-    // not blurry and a 4K window is not a megabyte per texture upload
+    // not blurry and a 4K window is not a megabyte per texture upload.
+    // v19: 1.35 -> 1.9 (a supersampled canvas: the review called the header and
+    // the axis digits pixelated, which is what a 1.35x downsample does to text)
     const onScreenW = (w / (halfW * 2)) * vw;
     const onScreenH = (h / (halfH * 2)) * vh;
-    const cw = Math.round(Math.min(1120, Math.max(560, onScreenW * 1.35)));
+    const cw = Math.round(Math.min(1440, Math.max(640, onScreenW * 1.9)));
     const chh = Math.max(160, Math.round(cw * (onScreenH / onScreenW)));
     if (cw !== canvas.width || chh !== canvas.height) {
       canvas.width = cw; canvas.height = chh;
@@ -510,7 +551,19 @@ export function createSkyChart(scene, camera, opts = {}) {
       stale: (stOverride || meta).mode !== 'demo' && Date.now() - lastFreshAt > STALE_MS,
       textureW: canvas.width, textureH: canvas.height, screenScale: +k.toFixed(3),
       plane: [+mesh.geometry.parameters.width.toFixed(2), +mesh.geometry.parameters.height.toFixed(2)],
-      position: [+mesh.position.x.toFixed(2), +mesh.position.y.toFixed(2), +mesh.position.z.toFixed(2)],
+      position: [+mesh.position.x.toFixed(2), +mesh.position.y.toFixed(2), +mesh.position.z.toFixed(3)],
+      // v19: the mount stack, so wallboardcheck can assert the glass is PROUD of
+      // the board face and never coplanar with it
+      mount: opts.board ? {
+        face: +opts.board.face.toFixed(3), gap: +opts.board.gap.toFixed(3),
+        glass: +mesh.position.z.toFixed(3),
+        proudBy: +(mesh.position.z - opts.board.face).toFixed(3)
+      } : null,
+      boardWorld: opts.board ? {
+        x0: +(opts.board.w / -2).toFixed(2), x1: +(opts.board.w / 2).toFixed(2),
+        y0: +(opts.board.y - opts.board.h / 2).toFixed(2), y1: +(opts.board.y + opts.board.h / 2).toFixed(2),
+        face: +opts.board.face.toFixed(3), front: +(mesh.position.z + 0.05).toFixed(3)
+      } : null,
       screen: {
         l: +Math.min(...pts.map((p) => p.x)).toFixed(3),
         r: +Math.max(...pts.map((p) => p.x)).toFixed(3),
@@ -525,6 +578,8 @@ export function createSkyChart(scene, camera, opts = {}) {
     window.removeEventListener('resize', onResize);
     scene.remove(group);
     mesh.geometry.dispose(); mat.dispose(); tex.dispose();
+    rails.forEach((m) => m.geometry.dispose());
+    body.geometry.dispose(); frameMat.dispose();
   }
   function onResize() { requestAnimationFrame(() => { layout(); draw(); }); }
   window.addEventListener('resize', onResize);

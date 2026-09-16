@@ -222,6 +222,24 @@ function handleState(s) {
     plates.sell.mom.style.width = Math.max(4, sellW * 2) + '%';
 }
 
+/* ---------- v19 price lane scale ---------- */
+const laneMark = $('lane-mark'), lanePct = $('lane-pct');
+const laneCatB = $('lane-cat-b'), laneCatS = $('lane-cat-s');
+const LANE_SHOWN = 5.2;   // world units of rope the scale covers, each way
+function setLane(d) {
+  if (!d || !d.lane) return;
+  const L = d.lane();
+  // the pair (the gold marker) and each cat (the tinted dots) on one scale, so
+  // the link between the tape and the cats' left/right travel is visible
+  const pct = (v) => Math.max(2, Math.min(98, 50 + (v / LANE_SHOWN) * 46));
+  laneMark.style.left = pct(L.lane * 3.2) + '%';
+  laneCatB.style.left = pct(d.catA.x) + '%';     // cat A = Sultan = BUY
+  laneCatS.style.left = pct(d.catB.x) + '%';     // cat B = Don Gato = SELL
+  const s = L.pct >= 0 ? '+' : '';
+  lanePct.textContent = `${s}${L.pct.toFixed(2)}%`;
+  lanePct.className = L.pct >= 0 ? 'up' : 'down';
+}
+
 /* ---------- duel-state pill + plate reactions (real fight telemetry) ----
    __duelDebug exposes the live director state; poll at 8 Hz (transform-only
    CSS reactions, so this is cheap and independent of the feed). */
@@ -230,6 +248,7 @@ setInterval(() => {
   try {
     const d = window.__duelDebug;
     if (!d || !d.catA || !d.catB) return;
+    setLane(d);
     const an = d.catA.state.name, bn = d.catB.state.name;
     // catA = Sultan Bigotes (BUY, right), catB = Don Gato (SELL, left) - v18
     setFighter('buy', d.catA.state); setFighter('sell', d.catB.state);

@@ -30,21 +30,38 @@ const V3 = THREE.Vector3;
 // v14 adds real technique: THRUST (the point leads), FEINT (bait the parry),
 // PARRY_BEAT (the timing counter), and faster cooldowns on the short moves so
 // the combinations stay legal.
+// v19 READABILITY PASS (user: "the fighting cats sword movement is too fast and
+// not recognizable"). The v14/v18 moves were 0.40-0.62 s long with the swing
+// arc packed into ~40% of that, so a cut crossed its whole arc in ~0.15 s: six
+// frames at 60 fps, which reads as a blur rather than a sword. A fencer's
+// tempo is roughly a 0.9-1.1 s phrase. Every move is now ~1.7x longer AND the
+// peak of the swing HOLDS for a beat before the settle, so the blade is legible
+// at the one moment it matters (cats.js carries the matching phase split).
+// Cooldowns, the beat clock and the side breather scale with them so the fight
+// stays a continuous exchange instead of a slower version of the same blur.
 const MOVES = {
-  RUSH:       { cat: 'A', len: 0.62, cool: 2.6, prio: 1 }, // Charge of the Golden Bull
-  LUNGE:      { cat: 'A', len: 0.5,  cool: 2.2, prio: 1 },
-  THRUST:     { cat: 'A', len: 0.42, cool: 1.6, prio: 1 }, // v14: the stop-thrust
-  FEINT:      { cat: 'A', len: 0.5,  cool: 2.8, prio: 2 }, // v14: the bait
-  SLASH_UP:   { cat: 'A', len: 0.55, cool: 2.8, prio: 1 }, // Matador Moonrise
-  TAUNT:      { cat: 'A', len: 0.8,  cool: 4.5, prio: 2 }, // Cross of the Conquistador
-  PARRY_HOP:  { cat: 'B', len: 0.45, cool: 1.9, prio: 1 }, // Zellij Sidestep
-  PARRY_BEAT: { cat: 'B', len: 0.4,  cool: 1.5, prio: 1 }, // v14: the beat
-  SLASH_SPIN: { cat: 'B', len: 0.6,  cool: 2.4, prio: 1 }, // Moorish Windmill
-  RIPOSTE:    { cat: 'B', len: 0.6,  cool: 2.2, prio: 2 }, // Crescent Riposte
+  RUSH:       { cat: 'A', len: 1.05, cool: 3.4, prio: 1 }, // Charge of the Golden Bull
+  LUNGE:      { cat: 'A', len: 0.90, cool: 3.0, prio: 1 },
+  THRUST:     { cat: 'A', len: 0.72, cool: 2.4, prio: 1 }, // v14: the stop-thrust
+  FEINT:      { cat: 'A', len: 0.85, cool: 3.4, prio: 2 }, // v14: the bait
+  SLASH_UP:   { cat: 'A', len: 1.00, cool: 3.6, prio: 1 }, // Matador Moonrise
+  TAUNT:      { cat: 'A', len: 1.30, cool: 5.5, prio: 2 }, // Cross of the Conquistador
+  PARRY_HOP:  { cat: 'B', len: 0.75, cool: 2.6, prio: 1 }, // Zellij Sidestep
+  PARRY_BEAT: { cat: 'B', len: 0.70, cool: 2.2, prio: 1 }, // v14: the beat
+  SLASH_SPIN: { cat: 'B', len: 1.10, cool: 3.4, prio: 1 }, // Moorish Windmill
+  RIPOSTE:    { cat: 'B', len: 1.05, cool: 3.2, prio: 2 }, // Crescent Riposte
   // v18: the seated guard - a POSTURE, not a strike. Long duration; the
   // director renews it while the tape stays against this cat.
-  SIT_GUARD:  { cat: 'A', len: 3.4,  cool: 0,   prio: 0 }
+  SIT_GUARD:  { cat: 'A', len: 4.6,  cool: 0,   prio: 0 }
 };
+// v19: how long the blade HOLDS at the peak of each swing (seconds, inside the
+// move). This is the single change that makes a cut readable: without it the
+// sword was mid-arc for every frame of the animation.
+const HOLD = {
+  RUSH: 0.14, LUNGE: 0.16, THRUST: 0.15, FEINT: 0.12, SLASH_UP: 0.20,
+  SLASH_SPIN: 0.16, RIPOSTE: 0.18, PARRY_HOP: 0.10, PARRY_BEAT: 0.11, TAUNT: 0.10
+};
+
 const OFFENSIVE = new Set(['RUSH', 'LUNGE', 'THRUST', 'SLASH_UP', 'SLASH_SPIN', 'RIPOSTE', 'TAUNT']);
 const DEFENSIVE = new Set(['PARRY_HOP', 'PARRY_BEAT', 'RIPOSTE', 'RECOVER']);
 // v18 ROLE POOLS (user: "if the pressure is sell, make the sell cat attack and
@@ -53,6 +70,10 @@ const DEFENSIVE = new Set(['PARRY_HOP', 'PARRY_BEAT', 'RIPOSTE', 'RECOVER']);
 // behaviour, and they are now chosen by PRESSURE SIGN, not by side.
 const ATTACK_POOL = ['LUNGE', 'THRUST', 'THRUST', 'SLASH_UP', 'FEINT'];
 const GUARD_POOL = ['PARRY_BEAT', 'PARRY_HOP'];
+// v19: the pair must be this close for the defender to be PINNED into his seat
+// (a cat 3 units away is not being pressed, he is just far away)
+const GUARD_GAP = 2.7;
+
 
 // v14 technique grammar: the reply MATCHES the technique instead of a coin
 // flip. v18 ROLE RULE: the reply is now always DEFENSIVE - the pressure side
@@ -148,8 +169,35 @@ export class FightDirector {
     // softly instead. The hunt (lateral weave) used to switch off with the
     // phase, which was a visible sideways snap every engage.
     this.hunt = 0;                 // low-passed lateral weave offset
+    // ---- v19 PRICE LANE ------------------------------------------------------
+    // (user: "the cats movement to the left and right must be connect to the
+    // price of btc"). The pair's position ALONG the rope used to drift with the
+    // 1-minute trend at 0.5 units/s behind a hard clamp, which is a private
+    // random walk: nothing on screen said why they moved. Now the pair slides on
+    // a lane whose position IS the tape: +1 = the duel has drifted to the BUY
+    // pole, -1 = to the SELL pole, and the input is the 30 s price change scaled
+    // so a 0.35% move is a full deflection (0.7 s low-pass, so the slide reads as
+    // a movement and not as a jump). lane() is published for the HUD scale.
+    this.lane = 0;                 // smoothed -1..+1 lane position
+    this.laneRaw = 0;              // the raw price-derived target
+    this.laneWin = 30;             // seconds: the price window the lane reads
+    this.laneFull = 0.0035;        // fraction of price = full lane deflection
+    this.laneHalf = 3.2;           // world units of travel at full deflection
+    this.lanePeak = 0;             // last 5 s peak |lane| (diagnostics)
+    this._lanePeakAt = 0;
   }
   _foe(side) { return side === 'A' ? 'B' : 'A'; }
+
+  // the lane as the HUD needs it: position (-1..1) + the window change in %
+  laneState() {
+    let p0 = null;
+    for (let i = this.priceHistory.length - 1; i >= 0; i--) {
+      if (this.now - this.priceHistory[i].t >= this.laneWin) { p0 = this.priceHistory[i].px; break; }
+    }
+    const pct = (p0 && this.price > 0) ? ((this.price - p0) / p0) * 100 : 0;
+    return { lane: +this.lane.toFixed(3), raw: +this.laneRaw.toFixed(3), pct: +pct.toFixed(3) };
+  }
+
 
   // ---------- public API (called by the data module) ----------
   // smoothed brawl intensity (0..1) that the scene's camera and crowd follow
@@ -237,38 +285,75 @@ export class FightDirector {
     // ---- pair locomotion (this is what actually makes them fight) ----
     if (!this.frozen) this._pacePair(dt);
 
-    // drift toward the winning side (spec 1.3): M = sign of the 1-min trend
-    const M = this.trendM();
+    /* ---- v19 PRICE LANE: the pair's place on the rope follows the tape ----
+     * The old drift was `mid += sign(1-min trend) * 0.5 * dt` behind a clamp:
+     * a private random walk with no visible cause. The lane below is the price:
+     * the 30 s change down-scaled so 0.35% is full deflection, low-passed at
+     * 0.7 s, mapped onto +-laneHalf world units toward the BUY pole (+) or the
+     * SELL pole (-). Rising price pushes the duel toward the BUY banner. */
+    let p30 = null;
+    for (let i = this.priceHistory.length - 1; i >= 0; i--) {
+      if (this.now - this.priceHistory[i].t >= this.laneWin) { p30 = this.priceHistory[i].px; break; }
+    }
+    if (p30 && this.price > 0) {
+      this.laneRaw = clamp(((this.price - p30) / p30) / this.laneFull, -1, 1);
+    }
     if (!this.frozen && !this.stumbling) {
-      this.mid = clamp(this.mid + M * 0.5 * dt, -(DIM.spanHalf - DIM.poleClearance - 1.2), DIM.spanHalf - DIM.poleClearance - 1.2);
+      this.lane += (this.laneRaw - this.lane) * Math.min(1, dt / 0.7);
       this.circlePhase += dt;
+      if (Math.abs(this.lane) >= this.lanePeak) { this.lanePeak = Math.abs(this.lane); this._lanePeakAt = this.now; }
+    }
+    if (!this.frozen) {
+      const laneMid = this.lane * this.laneHalf;
+      const lim = DIM.spanHalf - DIM.poleClearance - 1.2;
+      this.mid = clamp(laneMid, -lim, lim);
     }
 
     if (!this.frozen && !this.stumbling) this._checkTriggers();
-    // tempo clock: never let the duel go quiet
-    if (!this.frozen && !this.stumbling && this.now > this.busyUntil) this._tempoTick();
-    // v18: keep the losing side seated in his sword guard while the tape
-    // stays against him (see _maintainGuard)
+    /* v19: the SEATED GUARD runs BEFORE the beat clock. In v18 the clock ran
+     * first and its fallback branch handed the defender a parry hop every slot
+     * he could not attack in, so the seat could almost never be reached: the
+     * defender was permanently "between parries". The posture is now chosen
+     * first, and the parries are what interrupt it. */
     if (!this.frozen && !this.stumbling) this._maintainGuard();
+    if (!this.frozen && !this.stumbling && this.now > this.busyUntil) this._tempoTick();
     this._events.length = 0;
   }
 
   // ---- v18 THE SEATED GUARD (user: "the buy cat to sit down and defend with
   // his sword") ----
-  // When the tape leans against a cat (|pS| >= 0.10) and he is not mid-move,
-  // he drops into SIT_GUARD: crouched seat on the rope, sword held up in a
-  // closed guard. The director RENEWS the posture while the lean persists (a
-  // posture, not a one-shot), and releases him when the tape loosens past
-  // 0.05, when the pair breaks apart, or when the roles flip.
+  // When the tape leans against a cat and he is not mid-move, he drops into
+  // SIT_GUARD: crouched seat on the rope, sword held up in a closed guard.
+  // v19 (user: "the defending cat still does not sit and defend with his
+  // sword. i want that"): the posture is now entered EARLIER (|pS| >= 0.07,
+  // was 0.10), it is RENEWED just before it lapses so the seat is continuous
+  // instead of a 4.6 s posture followed by a stand-up gap, and it is released
+  // deliberately (tape flipped, tape went flat, or the pair broke apart) rather
+  // than being left to time out. A seated cat is still interrupted by his own
+  // parries - his sword stays up, so a beat or a hop lifts him out of the seat
+  // and the director re-seats him after it.
   _maintainGuard() {
     const P = this.pS;
     const defSide = P >= 0 ? 'B' : 'A';          // the side the tape leans ON
     const cat = this.cats[defSide];
     const st = cat.state.name;
-    const committed = Math.abs(P) >= 0.10;
+    const committed = Math.abs(P) >= 0.07;
     const held = st === 'SIT_GUARD';
-    if (!committed || held) return;
-    if (this.gap > 2.6) return;                  // too far apart to be pinned
+    if (held) {
+      // release conditions: role flip, tape gone flat, or the pair separated
+      if (!committed || this.gap > GUARD_GAP) {
+        cat.setState('RECOVER', 0.2);
+        return;
+      }
+      // renew before the posture lapses (SIT_GUARD t is reset; the pose target
+      // is unchanged, so the seat never visually pops up between renewals)
+      if (cat.state.dur > 0 && cat.state.t > cat.state.dur - 0.6) {
+        cat.setState('SIT_GUARD', MOVES.SIT_GUARD.len, { dir: this._fw(defSide) });
+      }
+      return;
+    }
+    if (!committed) return;
+    if (this.gap > GUARD_GAP) return;             // too far apart to be pinned
     if (!this._canMove(defSide, 'SIT_GUARD')) return;
     this._start(defSide, 'SIT_GUARD', { dir: this._fw(defSide) }, 'guard');
   }
@@ -287,7 +372,7 @@ export class FightDirector {
       // the targets themselves are also closer together than they were (1.45/2.25/
       // 1.95): a wide swing in the pair's distance read as the two of them surging
       // at each other and backing off, which is half of what "flakey" looked like
-      const bar = 1.9 - Math.abs(this.pS) * 0.35;
+      const bar = 2.4 - Math.abs(this.pS) * 0.4;
       const jit = 0.92 + Math.random() * 0.16;
       if (this.phase === 'circle') {
         this.phase = 'engage';
@@ -353,14 +438,16 @@ export class FightDirector {
     // tempo starts with a coefficient of variation of 0.68). Now each slot is
     // scheduled when the previous one comes due, and a slot the fighters cannot use
     // is skipped rather than saved up.
-    // a gentler contrast between the engage window and the circling than 0.44/0.92:
-    // the attack density still rises as they close, but the pair no longer lurches
-    // from a flurry to a lull, which is what the burst measure was picking up
-    const tempo = this.phase === 'engage' ? 0.56 : 0.80;
+    // v19: the beat stretches with the moves. At ~1.0 s per phrase a 0.56 s clock
+    // would start a new move inside the previous one (every call refused, the
+    // fight would stall), so the engage slot breathes at ~1.05 s and the circling
+    // slot at ~1.55 s. The attack DENSITY therefore settles at a watchable
+    // 60-75 moves/min instead of the old blur of 128.
+    const tempo = this.phase === 'engage' ? 1.05 : 1.55;
     if (this._slotAt === undefined) this._slotAt = this.now + 0.25;
     if (this.now < this._slotAt) return;
     this._slotAt = this.now + tempo * (0.9 + Math.random() * 0.2);
-    // ---- v18 ROLE ASSIGNMENT (user: "if the pressure is sell, make the sell
+    // ---- v18/v19 ROLE ASSIGNMENT (user: "if the pressure is sell, make the sell
     // cat attack and the buy cat sit down and defend with his sword") ----
     // pressure > 0 = BUY side attacks, SELL side defends; pressure < 0 = the
     // reverse. Dead tape (|pS| < 0.05) = neither committed: both circle, only
@@ -369,17 +456,27 @@ export class FightDirector {
     const dead = Math.abs(P) < 0.05;
     const atkSide = P >= 0 ? 'A' : 'B';          // A = BUY, B = SELL
     const defSide = atkSide === 'A' ? 'B' : 'A';
-    const probeOnly = dead;
-    let pool = probeOnly ? ['LUNGE', 'FEINT'] : ATTACK_POOL;
-    // the ATTACKER moves first; the defender answers from the REACTION table
-    // (below, in _start) or sits into the guard while the tape stays against it
+    let pool = dead ? ['LUNGE', 'FEINT'] : ATTACK_POOL;
+    // 1. the ATTACKER moves first
     for (const mv of this._ordered(pool)) {
       if (this._canMove(atkSide, mv)) { this._start(atkSide, mv, { dir: this._fw(atkSide) }, 'tempo'); return; }
     }
-    // attacker fully committed: the defender keeps his feet moving (a parry
-    // hop), which reads as a fighter working on the back foot
-    for (const mv of ['PARRY_HOP', 'PARRY_BEAT']) {
-      if (this._canMove(defSide, mv)) { this._start(defSide, mv, { dir: this._fw(defSide) }, 'tempo'); return; }
+    /* 2. the DEFENDER. v19: he does NOT get a free parry hop here any more. In
+     * v18 this branch handed the defender a PARRY_HOP every time the attacker
+     * could not act, which consumed his side-breather and kept him standing
+     * out of the seat (measured: the seat only ever appeared in a third of
+     * samples, and never in a row). He now either holds the sword guard
+     * (the tape is against him) or keeps his feet moving while both are
+     * uncommitted on a flat tape. */
+    if (!dead) {
+      if (this._canMove(defSide, 'SIT_GUARD') && this.gap <= GUARD_GAP) {
+        this._start(defSide, 'SIT_GUARD', { dir: this._fw(defSide) }, 'guard');
+        return;
+      }
+    } else {
+      for (const mv of ['PARRY_HOP', 'PARRY_BEAT']) {
+        if (this._canMove(defSide, mv)) { this._start(defSide, mv, { dir: this._fw(defSide) }, 'tempo'); return; }
+      }
     }
   }
 
@@ -506,12 +603,17 @@ export class FightDirector {
     this.cools[move] = this.now + spec.cool;
     // v14: a chained combo move skips its side's breather (it is one action),
     // but the per-move cooldown still applies so a chain cannot machine-gun.
-    if (!opts.chain) this.sideCool[side] = this.now + 0.55;
+    // v19: the breather stretches with the longer moves (0.55 -> 0.75) so a
+    // fighter cannot start a second phrase on top of the first.
+    if (!opts.chain) this.sideCool[side] = this.now + 0.75;
     this.active[side] = move;
     this.lastMoveAt = this.now;
     this._lastMover = side;
     this.stats.moves++;
-    cat.setState(move, spec.len, data);
+    // v19: hand the peak HOLD to the pose layer - the blade stays at the top of
+    // its arc for a beat, which is what makes the swing readable
+    cat.setState(move, spec.len, { hold: HOLD[move] || 0, ...data });
+
     // v14: the combo chain. If this move has a follow-up, check for it just
     // after the move ends (mid-RECOVER, still one phrase): a lunge flows into
     // the thrust, a beat into the riposte. Depth caps the phrase at three
@@ -606,10 +708,14 @@ export class FightDirector {
   // crossed blades -> shove -> break: the signature duelling beat
   _beginLock(winner) {
     const loser = winner === 'A' ? 'B' : 'A';
-    const lockDur = 0.42 + Math.random() * 0.10;
+    // v19: a blade lock is the most legible beat in the fight, so it gets a
+    // little more time on screen (0.5-0.62 s of crossed blades) and a longer
+    // breather after it before anyone may start the next phrase
+    const lockDur = 0.50 + Math.random() * 0.12;
     this.lastLockAt = this.now;
     this._lastWinner = winner;
-    this.busyUntil = this.now + lockDur + 0.55;
+    this.busyUntil = this.now + lockDur + 0.70;
+
     this.active.A = 'BLADE_LOCK'; this.active.B = 'BLADE_LOCK';
     this.cats.A.setState('BLADE_LOCK', lockDur, { winner: winner === 'A' });
     this.cats.B.setState('BLADE_LOCK', lockDur, { winner: winner === 'B' });
@@ -631,7 +737,7 @@ export class FightDirector {
       this.cats.B.setState('RECOVER', 0.2);
       delete this.active.A; delete this.active.B;
       this.lastMoveAt = this.now;
-      this.lockCool = this.now + 2.2;
+      this.lockCool = this.now + 3.0;
       // always break apart after a lock: charge -> clash -> disengage -> circle
       this.phase = 'break';
       this.phaseT = 0;
