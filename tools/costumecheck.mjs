@@ -12,6 +12,8 @@ await mkdir(out, {recursive:true});
 const server = http.createServer(async(req,res)=>{
   try {
     const p = new URL(req.url,'http://localhost').pathname;
+    const allowed = p==='/' || ['/index.html','/feed.js','/bundle.js'].includes(p) || /^\/(vendor|fonts)\/[a-zA-Z0-9_./-]+$/.test(p);
+    if (!allowed || p.split('/').some(s=>s.startsWith('.'))) {res.writeHead(404);res.end();return;}
     const file = path.join(root,p==='/'?'index.html':p);
     const data=await readFile(file);
     res.setHeader('Content-Type',({'.js':'text/javascript','.html':'text/html','.woff2':'font/woff2'})[path.extname(file)]||'application/octet-stream');
@@ -55,7 +57,9 @@ try {
     if(pixels<1000)throw Error(side+' character not visibly rendered');
     await page.evaluate(s=>{window.__duelDebug['cat'+s].root.visible=true;},side);
   }
-  // Portraits show the actual same geometry, not concept art or replacements.
+  // Portraits use local source modules; production ships only the IIFE bundle.
+  // Deployed verification above tests real arena pixels without extra requests.
+  if (!base) {
   await page.evaluate(async()=>{
     const T=await import('./vendor/three.module.js');
     window.__portraitT=T;
@@ -76,6 +80,7 @@ try {
       return {calls:d.renderer.info.render.calls,triangles:d.renderer.info.render.triangles};
     },side);
     await page.screenshot({path:path.join(out,tag+'-'+side+'-portrait.png')});
+  }
   }
   if(errors.length)throw Error(errors.join('; '));
   report.passed=true;
