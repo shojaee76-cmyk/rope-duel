@@ -144,6 +144,8 @@ export function createDuelScene(container, opts = {}) {
   const _pelA = new THREE.Vector3(), _cheA = new THREE.Vector3();
   const _pelB = new THREE.Vector3(), _cheB = new THREE.Vector3();
   const _bp = new THREE.Vector3();
+  // v21 blade-guard scratch (see the BLADE GUARD constraint in the loop)
+  const _gp = new THREE.Vector3(), _gf = new THREE.Vector3();
   // point-to-segment distance: the torso proxy is a capsule, not a sphere
   function segDist(p, a, c) {
     const abx = c.x - a.x, aby = c.y - a.y, abz = c.z - a.z;
@@ -250,6 +252,17 @@ export function createDuelScene(container, opts = {}) {
   const contact = opts.debug ? { checks: 0, fixes: 0, worst: 9, worstOut: 9, post: null } : null;
   // v19b blade-contact: switch + telemetry (same shape as the head constraint's)
   const clipOff = /[?&]clip=off/.test(typeof location !== 'undefined' ? location.search : '');
+  // v21: ?block=off disables the BLADE GUARD aim (same A/B evidence pattern as
+  // ?clip=off: the deployed pixel tests can then prove the aim is what made the
+  // defending blade meet the incoming one).
+  const blockOff = /[?&]block=off/.test(typeof location !== 'undefined' ? location.search : '');
+  // BLADE GUARD constants (module scope, no per-frame allocation)
+  const BLOCK_STATES = new Set(['SIT_GUARD', 'PARRY_BEAT', 'PARRY_HOP']);
+  const BLOCK_U = [0.45, 0.62, 0.80, 1.0];            // blade samples, hilt excluded
+  const BLOCK_JOINTS = ['sz', 'sx', 'ez'];            // shoulder.z, shoulder.x, elbow.z
+  const BLOCK_REACH = 1.30;                           // only aim when the blades share a volume
+  const BLOCK_TARGET = 0.05;                          // "touching", a hair of air for the sparks
+  const BLOCK_ITERS = 3;
   const clipTelemetry = opts.debug ? { checks: 0, fixes: 0, worstIn: 0, worstOut: 0, last: {} } : null;
   function bladeCross(a, b, out) {
     a.bladeMidWorld(out);
@@ -623,6 +636,93 @@ export function createDuelScene(container, opts = {}) {
       }
     }
     rope.updateVisual();
+
+    /* ---- v21 BLADE GUARD (user: "in defend, make the sword block the other
+     * sword") ----
+     * Before this, a defending cat held a static high guard NEXT TO the incoming
+     * blade: measured on the pinned pair (tools/eyeguard.mjs), the defending
+     * blade stayed 0.17-1.50 world units away from the attacking one for every
+     * strike, so nothing ever looked blocked - the swords crossed only in the
+     * rare BLADE_LOCK beat.
+     * This is the same monotone-verified pattern as the head and blade-contact
+     * constraints: measure the REAL rendered blade segments (4 samples each, hilt
+     * excluded), then hill-climb the defending arm's three joints toward contact
+     * (shoulder.z, shoulder.x, elbow.z), keeping a step only if the measured
+     * blade-to-blade distance actually drops AND the blade does not gain
+     * penetration into either body. It runs BEFORE the blade-contact pass, which
+     * keeps the last word on safety, and only while the cat is in a guard state
+     * with the foe's blade already within BLOCK_REACH - so it is an aim, not a
+     * pose replace. ?block=off disables it for A/B evidence. */
+    if (!freezeCtl.armed && !blockOff) {
+      const bs = BLOCK_U;
+      for (const cat of [catA, catB]) {
+        if (!BLOCK_STATES.has(cat.state.name)) continue;
+        const foe = cat === catA ? catB : catA;
+        const arm = cat.data.arms[cat.data.swordArm];
+        const sw = cat.data.sword, fsw = foe.data.sword;
+        const ownHead = cat === catA ? _hA : _hB;
+        const foeHead = cat === catA ? _hB : _hA;
+        const ownPel = cat === catA ? _pelA : _pelB, ownChe = cat === catA ? _cheA : _cheB;
+        const foePel = cat === catA ? _pelB : _pelA, foeChe = cat === catA ? _cheB : _cheA;
+        cat.headCentreWorld(ownHead); foe.headCentreWorld(foeHead);
+        cat.data.hips.getWorldPosition(ownPel); cat.data.spine.getWorldPosition(ownChe);
+        foe.data.hips.getWorldPosition(foePel); foe.data.spine.getWorldPosition(foeChe);
+        const gapTo = () => {
+          let best = 1e9;
+          for (let i = 0; i < bs.length; i++) {
+            _gp.set(bs[i], 0, 0); sw.localToWorld(_gp);
+            for (let j = 0; j < bs.length; j++) {
+              _gf.set(bs[j], 0, 0); fsw.localToWorld(_gf);
+              const dx = _gp.x - _gf.x, dy = _gp.y - _gf.y, dz = _gp.z - _gf.z;
+              const d = dx * dx + dy * dy + dz * dz;
+              if (d < best) best = d;
+            }
+          }
+          return Math.sqrt(best);
+        };
+        const pen = () => {
+          let worst = 0;
+          for (let i = 0; i < bs.length; i++) {
+            _bp.set(bs[i], 0, 0); sw.localToWorld(_bp);
+            const pf = Math.max(0.26 - segDist(_bp, foePel, foeChe), 0.28 - _bp.distanceTo(foeHead));
+            const ps = Math.max(0.26 - segDist(_bp, ownPel, ownChe), 0.28 - _bp.distanceTo(ownHead));
+            if (pf > worst) worst = pf;
+            if (ps > worst) worst = ps;
+          }
+          return worst;
+        };
+        let d0 = gapTo();
+        if (d0 > BLOCK_REACH || d0 <= BLOCK_TARGET) continue;
+        let pen0 = pen();
+        let step = 0.20;
+        for (let it = 0; it < BLOCK_ITERS && step > 0.03 && d0 > BLOCK_TARGET; it++) {
+          const sz = arm.shoulder.rotation.z, sx = arm.shoulder.rotation.x, ez = arm.elbow.rotation.z;
+          let bestD = d0, bestSet = null;
+          for (const j of BLOCK_JOINTS) {
+            for (const dir of [1, -1]) {
+              arm.shoulder.rotation.z = sz + (j === 'sz' ? dir * step : 0);
+              arm.shoulder.rotation.x = sx + (j === 'sx' ? dir * step : 0);
+              arm.elbow.rotation.z = ez + (j === 'ez' ? dir * step : 0);
+              cat.root.updateMatrixWorld(true);
+              const d = gapTo();
+              if (d < bestD - 0.002 && pen() <= pen0 + 0.008) { bestD = d; bestSet = [arm.shoulder.rotation.z, arm.shoulder.rotation.x, arm.elbow.rotation.z]; }
+            }
+          }
+          if (bestSet) {
+            arm.shoulder.rotation.z = bestSet[0];
+            arm.shoulder.rotation.x = bestSet[1];
+            arm.elbow.rotation.z = bestSet[2];
+            cat.root.updateMatrixWorld(true);
+            d0 = bestD;
+            pen0 = pen();
+          } else {        // no joint move helped: try a finer step before giving up
+            arm.shoulder.rotation.z = sz; arm.shoulder.rotation.x = sx; arm.elbow.rotation.z = ez;
+            cat.root.updateMatrixWorld(true);
+            step *= 0.5;
+          }
+        }
+      }
+    }
 
     /* ---- v19b BLADE CONTACT (user: "the swords, the cats and the clouthes are
      * colliding to each other anytime") ----

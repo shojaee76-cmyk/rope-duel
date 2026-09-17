@@ -92,7 +92,8 @@ async function sample(move, dur, hold) {
 }
 
 const out = [];
-for (const [move, dur, hold] of [['LUNGE', 0.90, 0.16], ['SLASH_UP', 1.00, 0.20], ['THRUST', 0.72, 0.15]]) {
+// v21 durations/holds (director.js MOVES + HOLD)
+for (const [move, dur, hold] of [['LUNGE', 0.67, 0.13], ['SLASH_UP', 0.74, 0.16], ['THRUST', 0.53, 0.13]]) {
   const r = await sample(move, dur, hold);
   out.push(r);
   console.log(JSON.stringify(r));

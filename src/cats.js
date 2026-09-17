@@ -25,7 +25,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { CAT_A, CAT_B, MATERIALS, DIM } from './palette.js';
 import { furTexture, clothTexture, metalTexture, leatherTexture, pleatTexture } from './tex.js';
-import { robeTexture, knightClothTexture, eyeTexture } from './costume-textures.js';
+import { robeTexture, knightClothTexture, ballEyeTexture } from './costume-textures.js';
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -120,22 +120,9 @@ function foldedCylinder(rt, rb, h, segments = 32, rows = 6, folds = 10, depth = 
   g.computeVertexNormals();
   return g;
 }
-// Convex almond cap: local XY is the lid opening, local +Z faces out.
-function almond(w, h, depth = 0.009) {
-  const vertices = [0,0,depth], uv = [0.5,0.5], indices = [];
-  const n = 32;
-  for (let i = 0; i < n; i++) {
-    const a = i/n*Math.PI*2, x = Math.cos(a)*w/2;
-    const y = Math.sin(a)*h/2*(0.72+0.28*Math.abs(Math.sin(a)));
-    vertices.push(x,y,0); uv.push(x/w+0.5,y/h+0.5);
-    indices.push(0,i+1,(i+1)%n+1);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
-  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
-  g.setIndex(indices); g.computeVertexNormals();
-  return g;
-}
+// v21: the convex almond eye cap is gone with the v20 eye build (the user
+// rejected it twice and asked for the original ball eye back). Deleted rather
+// than left as dead code - nothing else in the rig used it.
 
 // pivot with a limb segment hanging along -Y
 function limb(parent, x, y, z, len, r, mat) {
@@ -158,14 +145,9 @@ function buildRig(c) {
     fur: std(c.furBase, 'fur', { bumpScale: 0.04 }, furPair),
     belly: std(c.furBelly, 'fur', { bumpScale: 0.03 }, bellyPair),
     inner: std(c.earInner, 'fur', {}, furPair),
-    eye: std('#FFFFFF', 'fur', { emissive: c.eye, emissiveIntensity: 0.08, roughness: 0.28 },
-      tex(`eye-${c.eye}`, () => eyeTexture(c.eye))),
+    eye: std('#FFFFFF', 'steel', { roughness: 0.62, metalness: 0.0, emissive: c.eye, emissiveIntensity: c.eyeGlow * 0.22 },
+      tex(`eyeball-${c.eye}`, () => ballEyeTexture(c.eye))),
     cheek: std(c.furBelly, 'fur', { roughness: 0.94 }),
-    lid: std(c.furKey === 'A-fur' ? '#695346' : '#424651', 'fur'),
-    socket: std('#25252C', 'fur'),
-    brow: std(c.furKey === 'A-fur' ? '#C08A52' : '#CAD0D3', 'fur'),
-    // Eyes are one mapped convex almond per side; no block pupil overlays.
-    pupil: std('#101014', 'fur'),
     nose: std(c.nose, 'fur'),
     whisker: std('#FFFFFF', 'fur', { roughness: 0.45 }),
     mouth: std('#241A14', 'fur')
@@ -219,23 +201,31 @@ function buildRig(c) {
   for (const sz of [-1,1]) {
     mouthGeos.push(stroke([[0.277,-0.060,0],[0.273,-0.075,sz*0.024],
       [0.253,-0.073,sz*0.056],[0.233,don && sz===1 ? -0.053 : -0.064,sz*0.079]],0.0026,9));
-    // Each eye faces diagonally forward and outward so the camera-side eye
-    // remains readable at profile, rather than disappearing inside the skull.
+    // v21 EYES (user: "the eyes are getting fucked. Make them simple ball and
+    // back to the original eye. Its ugly now"). The v20 stack - a convex almond
+    // socket + a painted-iris almond + a stroke eyelid + a stroke brow - was
+    // rejected twice: the vision pass scored it 4/10 ("tacked on, protruding,
+    // the eyelid clipping into the head") and the user called it ugly. It is
+    // GONE. Each eye is now the ORIGINAL single ball, with the pupil and
+    // catchlight painted into the ball's own texture (ballEyeTexture) instead of
+    // being extra meshes pressed against its front, so nothing in the eye can
+    // protrude, float, clip or z-fight.
+    //
+    // Two measured corrections on top of the v19b ball:
+    //  - the v19b pupil box (x .158 against a .165 ball surface) was buried
+    //    INSIDE the eyeball, so those eyes were plain colour orbs with no gaze
+    //    at all; the painted slit is on the ball's face by construction.
+    //  - the v19b ball was yawed 44 degrees outward and sat far outboard, which
+    //    reads as googly side-mounted orbs. The eye is now 0.42 rad out (a
+    //    forward gaze with a slight outward angle) and 0.027 proud of the skull
+    //    (was 0.037), so it reads as an eye set in the face rather than stuck on.
     const eye = new THREE.Group();
-    eye.position.set(0.143,0.065,sz*0.135);
-    eye.rotation.y = sz > 0 ? 0.77 : Math.PI-0.77;
+    eye.position.set(0.135,0.060,sz*0.122);
+    eye.rotation.y = sz > 0 ? 0.42 : Math.PI-0.42;
     eye.rotation.z = sz*(don ? 0.10 : -0.09);
-    const height = don && sz===1 ? 0.065 : don ? 0.057 : 0.050;
-    const socket = mesh(almond(0.105,height+0.013,0.009),M.socket);
-    const iris = mesh(almond(0.093,height,0.011),M.eye,0,0,0.004);
-    iris.name = 'almond-eye-slit-pupil';
-    eye.add(socket,iris);
-    const lid = mesh(stroke([[-0.051,0,0.004],[-0.026,height*0.47,0.009],
-      [0,height*0.54,0.01],[0.029,height*0.40,0.009],[0.052,0,0.004]],0.003,10),M.lid);
-    eye.add(lid);
-    const brow = mesh(stroke([[-0.043,height*0.58,0],[-0.018,height*0.79,0.002],
-      [0.020,height*(don && sz===1 ? 0.92 : 0.69),0]],0.005,8),M.brow);
-    eye.add(brow); head.add(eye);
+    const ball = mesh(sphere(0.047, 20, 14), M.eye, 0, 0, -0.008);
+    ball.name = 'eye-ball';
+    eye.add(ball); head.add(eye);
   }
   head.add(mesh(joined(mouthGeos),M.mouth));
   const whiskerGeos = [];
@@ -758,8 +748,8 @@ const NUM_KEYS = Object.keys(IDLE_TEMPLATE);
 // charging lunge visibly do not cost the same effort.
 // v19: scaled with the longer moves so the release stays proportional.
 const RECOVER_T = {
-  RUSH: 0.42, LUNGE: 0.32, SLASH_UP: 0.30, THRUST: 0.26, SLASH_SPIN: 0.34,
-  RIPOSTE: 0.34, FEINT: 0.16, PARRY_HOP: 0.16, PARRY_BEAT: 0.13, TAUNT: 0.24, HIT: 0.20,
+  RUSH: 0.32, LUNGE: 0.25, SLASH_UP: 0.23, THRUST: 0.20, SLASH_SPIN: 0.26,
+  RIPOSTE: 0.26, FEINT: 0.13, PARRY_HOP: 0.13, PARRY_BEAT: 0.10, TAUNT: 0.19, HIT: 0.16,
   SIT_GUARD: 0.30   // standing up from the seat is a settle, not a windmill
 };
 
@@ -838,7 +828,9 @@ export class DuelCat {
     // instead of snapping to each new target (the readability pass needs the
     // arm to travel THROUGH space, not teleport between keyframes).
     const p = this.pose, tg = this.target;
-    const k = 1 - Math.exp(-20 * dt);
+    // v21: 26 instead of 20 - the moves are 1.35x shorter again, so the limbs have
+    // to track faster or the pose lags behind the state and smears the swing.
+    const k = 1 - Math.exp(-26 * dt);
     for (const key of NUM_KEYS) p[key] = lerp(p[key], tg[key], k);
 
     this._applyPose(dt, ctx);
@@ -1286,14 +1278,16 @@ export class DuelCat {
     /* v18.2: the blade points FORWARD at the foe (user: "he is gonna put his
      * sword in front of him. Not behind. Thats not make sense"). The v19b
      * pose (shS_z -0.25, elS -2.55: elbow down + forearm folded tight) aimed
-     * the blade BACKWARD (-0.94 in spine space). Measured fix: arm forward
-     * (shS_z +0.7), elbow open to -1.45 -> the forearm+blade ride up-forward
-     * at ~50 deg, paw at chest height, TIP in the air corridor between the
-     * cats beside the foe's head (tip x within +-0.35, y ~3.5, i.e. outside
-     * the foe's body capsule AND head sphere - a hanging point guard). */
-    tg.shS_z = 0.70 + guardUp * 0.3;               // arm swung FORWARD
-    tg.shS_x = 0.35;                               // blade plane out of the body
-    tg.elS = -1.45 + guardUp;                      // forearm up-forward ~50 deg
+     * the blade BACKWARD (-0.94 in spine space). Measured fix: arm forward,
+     * elbow open -> the forearm+blade ride up-forward, paw at chest height, TIP
+     * in the air corridor between the cats beside the foe's head.
+     * v21 (user: "in defend, make the sword block the other sword"): the guard
+     * rides a little higher and further forward so the blade sits ON the
+     * incoming line rather than beside it - the BLADE GUARD constraint in
+     * scene.js then closes the last few centimetres onto the foe's blade. */
+    tg.shS_z = 0.88 + guardUp * 0.3;               // arm swung FORWARD
+    tg.shS_x = 0.50;                               // blade plane out of the body
+    tg.elS = -1.25 + guardUp;                      // forearm up-forward ~50 deg
     tg.shO_z = -0.70;                              // off arm braced forward
     tg.shO_x = 0.60;
     tg.elO = -1.10;

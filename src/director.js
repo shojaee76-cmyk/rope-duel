@@ -39,27 +39,35 @@ const V3 = THREE.Vector3;
 // at the one moment it matters (cats.js carries the matching phase split).
 // Cooldowns, the beat clock and the side breather scale with them so the fight
 // stays a continuous exchange instead of a slower version of the same blur.
+// v21 TEMPO (user: "also the movement are too low now. Make it faster").
+// The v19 readability pass stretched every move ~1.7x and hung a HOLD at the top
+// of each arc, which fixed the blur but overshot: the fight now reads as slow
+// motion. Every length is scaled to 1/1.35 of v19 and every cooldown to 1/1.3,
+// with the holds trimmed proportionally, so a phrase is back to ~0.5-1.0 s while
+// the swing still ends in a legible stop (cats.js keeps the split). The v19 note
+// below is kept as the record of why the moves are not as short as v18's either.
 const MOVES = {
-  RUSH:       { cat: 'A', len: 1.05, cool: 3.4, prio: 1 }, // Charge of the Golden Bull
-  LUNGE:      { cat: 'A', len: 0.90, cool: 3.0, prio: 1 },
-  THRUST:     { cat: 'A', len: 0.72, cool: 2.4, prio: 1 }, // v14: the stop-thrust
-  FEINT:      { cat: 'A', len: 0.85, cool: 3.4, prio: 2 }, // v14: the bait
-  SLASH_UP:   { cat: 'A', len: 1.00, cool: 3.6, prio: 1 }, // Matador Moonrise
-  TAUNT:      { cat: 'A', len: 1.30, cool: 5.5, prio: 2 }, // Cross of the Conquistador
-  PARRY_HOP:  { cat: 'B', len: 0.75, cool: 2.6, prio: 1 }, // Zellij Sidestep
-  PARRY_BEAT: { cat: 'B', len: 0.70, cool: 2.2, prio: 1 }, // v14: the beat
-  SLASH_SPIN: { cat: 'B', len: 1.10, cool: 3.4, prio: 1 }, // Moorish Windmill
-  RIPOSTE:    { cat: 'B', len: 1.05, cool: 3.2, prio: 2 }, // Crescent Riposte
+  RUSH:       { cat: 'A', len: 0.78, cool: 2.6, prio: 1 }, // Charge of the Golden Bull
+  LUNGE:      { cat: 'A', len: 0.67, cool: 2.3, prio: 1 },
+  THRUST:     { cat: 'A', len: 0.53, cool: 1.85, prio: 1 }, // v14: the stop-thrust
+  FEINT:      { cat: 'A', len: 0.63, cool: 2.6, prio: 2 }, // v14: the bait
+  SLASH_UP:   { cat: 'A', len: 0.74, cool: 2.8, prio: 1 }, // Matador Moonrise
+  TAUNT:      { cat: 'A', len: 0.96, cool: 4.2, prio: 2 }, // Cross of the Conquistador
+  PARRY_HOP:  { cat: 'B', len: 0.56, cool: 2.0, prio: 1 }, // Zellij Sidestep
+  PARRY_BEAT: { cat: 'B', len: 0.52, cool: 1.7, prio: 1 }, // v14: the beat
+  SLASH_SPIN: { cat: 'B', len: 0.81, cool: 2.6, prio: 1 }, // Moorish Windmill
+  RIPOSTE:    { cat: 'B', len: 0.78, cool: 2.5, prio: 2 }, // Crescent Riposte
   // v18: the seated guard - a POSTURE, not a strike. Long duration; the
   // director renews it while the tape stays against this cat.
   SIT_GUARD:  { cat: 'A', len: 4.6,  cool: 0,   prio: 0 }
 };
 // v19: how long the blade HOLDS at the peak of each swing (seconds, inside the
 // move). This is the single change that makes a cut readable: without it the
-// sword was mid-arc for every frame of the animation.
+// sword was mid-arc for every frame of the animation. v21 trims the holds with
+// the moves so the hold stays ~15-20% of the move instead of eating it.
 const HOLD = {
-  RUSH: 0.14, LUNGE: 0.16, THRUST: 0.15, FEINT: 0.12, SLASH_UP: 0.20,
-  SLASH_SPIN: 0.16, RIPOSTE: 0.18, PARRY_HOP: 0.10, PARRY_BEAT: 0.11, TAUNT: 0.10
+  RUSH: 0.12, LUNGE: 0.13, THRUST: 0.13, FEINT: 0.10, SLASH_UP: 0.16,
+  SLASH_SPIN: 0.14, RIPOSTE: 0.15, PARRY_HOP: 0.09, PARRY_BEAT: 0.09, TAUNT: 0.09
 };
 
 const OFFENSIVE = new Set(['RUSH', 'LUNGE', 'THRUST', 'SLASH_UP', 'SLASH_SPIN', 'RIPOSTE', 'TAUNT']);
@@ -372,7 +380,7 @@ export class FightDirector {
       // the targets themselves are also closer together than they were (1.45/2.25/
       // 1.95): a wide swing in the pair's distance read as the two of them surging
       // at each other and backing off, which is half of what "flakey" looked like
-      const bar = 2.4 - Math.abs(this.pS) * 0.4;
+      const bar = 1.9 - Math.abs(this.pS) * 0.35;
       const jit = 0.92 + Math.random() * 0.16;
       if (this.phase === 'circle') {
         this.phase = 'engage';
@@ -395,7 +403,7 @@ export class FightDirector {
     // read as a marching step each phase. An exponential approach (a fraction
     // of the remaining distance per step, capped so a surprise phase change
     // cannot teleport anyone) glides in and settles onto the target.
-    const closeRate = 2.6, backRate = 1.8;        // 1/s approach rates
+    const closeRate = 3.2, backRate = 2.2;        // 1/s approach rates
     const rate = target < sep ? closeRate : backRate;
     const remain = target - sep;
     const step = Math.sign(remain) *
@@ -443,7 +451,10 @@ export class FightDirector {
     // fight would stall), so the engage slot breathes at ~1.05 s and the circling
     // slot at ~1.55 s. The attack DENSITY therefore settles at a watchable
     // 60-75 moves/min instead of the old blur of 128.
-    const tempo = this.phase === 'engage' ? 1.05 : 1.55;
+    // v21: the cloc/tempo and the breathers come down with the moves (engage
+    // 1.05 -> 0.78, circling 1.55 -> 1.15), so the attack density rises with the
+    // shorter phrases instead of leaving dead air between them.
+    const tempo = this.phase === 'engage' ? 0.78 : 1.15;
     if (this._slotAt === undefined) this._slotAt = this.now + 0.25;
     if (this.now < this._slotAt) return;
     this._slotAt = this.now + tempo * (0.9 + Math.random() * 0.2);
@@ -605,7 +616,7 @@ export class FightDirector {
     // but the per-move cooldown still applies so a chain cannot machine-gun.
     // v19: the breather stretches with the longer moves (0.55 -> 0.75) so a
     // fighter cannot start a second phrase on top of the first.
-    if (!opts.chain) this.sideCool[side] = this.now + 0.75;
+    if (!opts.chain) this.sideCool[side] = this.now + 0.55;
     this.active[side] = move;
     this.lastMoveAt = this.now;
     this._lastMover = side;
@@ -693,7 +704,13 @@ export class FightDirector {
     // they now have a cadence guard: a fresh lock cuts the chance and an overdue one
     // raises it, so the draws cannot pile up into runs or vanish into a drought.
     const sinceLock = this.now - this.lastLockAt;
-    const base = canParry ? 0.6 : 0.18;
+    // v21 BLADE BLOCK (user: "in defend, make the sword block the other sword"):
+    // a seated guard is a BLOCK, not a coin flip - his blade is raised across the
+    // line, so an attack that arrives while he is seated crosses blades far more
+    // often than the default cadence allows. scene.js carries the matching
+    // BLADE GUARD constraint, which keeps the defending blade pointing into the
+    // foe's blade (measured segment-to-segment) for the whole posture.
+    const base = defMove === 'SIT_GUARD' ? 0.85 : canParry ? 0.6 : 0.18;
     const guard = sinceLock < 4 ? 0.35 : sinceLock > 9 ? 1.25 : 1;
     if (Math.random() > Math.min(0.92, base * guard)) return false;
     // winner = current pressure favours that side; on a flat tape the locks simply
@@ -711,10 +728,10 @@ export class FightDirector {
     // v19: a blade lock is the most legible beat in the fight, so it gets a
     // little more time on screen (0.5-0.62 s of crossed blades) and a longer
     // breather after it before anyone may start the next phrase
-    const lockDur = 0.50 + Math.random() * 0.12;
+    const lockDur = 0.42 + Math.random() * 0.10;
     this.lastLockAt = this.now;
     this._lastWinner = winner;
-    this.busyUntil = this.now + lockDur + 0.70;
+    this.busyUntil = this.now + lockDur + 0.55;
 
     this.active.A = 'BLADE_LOCK'; this.active.B = 'BLADE_LOCK';
     this.cats.A.setState('BLADE_LOCK', lockDur, { winner: winner === 'A' });

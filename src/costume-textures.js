@@ -116,23 +116,34 @@ export function knightClothTexture(part = 'cape') {
   return finish(c, 0.18);
 }
 
-export function eyeTexture(color) {
-  // v18.2: the iris gradient now fills the WHOLE canvas. The almond geometry
-  // maps its full UV square into the fan, so the old dark-background version
-  // put dark corners at the almond tips and the eye read as a black blob with
-  // a pin-prick of colour (user: "you fucked up the eyes"). Now every visible
-  // texel is iris: colour field, dark rim at the almond edge, slit, lights.
-  const { c, g } = surface(128, 128, color);
-  const iris = g.createRadialGradient(64,64,4,64,64,96);
-  iris.addColorStop(0, '#F9E5A4'); iris.addColorStop(0.30, color);
-  iris.addColorStop(0.74, color); iris.addColorStop(1, '#241A12');
-  g.fillStyle = iris; g.fillRect(0,0,128,128);
-  // Tapered slit, not a box; reflected light is painted in the same draw call.
-  g.fillStyle = '#090C10'; g.beginPath(); g.moveTo(64,10);
-  g.bezierCurveTo(46,42,46,87,64,118);
-  g.bezierCurveTo(80,88,80,40,64,10); g.fill();
-  g.fillStyle = '#FFFCED'; g.beginPath(); g.ellipse(45,36,9,12,-0.4,0,Math.PI*2); g.fill();
-  g.fillStyle = 'rgba(255,255,240,0.5)';
-  g.beginPath(); g.arc(77,86,4,0,Math.PI*2); g.fill();
+// v21: the eye is a plain BALL again (user: "make them simple ball and back to
+// the original eye"). The pupil is painted onto the ball instead of being a
+// second mesh stuck on the front: a sphere's UV puts the +Z pole (the direction
+// the eye looks) at u = 0.25, v = 0.5, so the slit sits exactly on the face of
+// the ball and follows its curvature. The v19b "original" pupil was a box whose
+// x .158 sat INSIDE the .165 ball surface - it never rendered at all, which is
+// why those eyes read as plain gold orbs; and a pupil built as a separate
+// ellipsoid pressed against the ball only shows a thin crescent (measured: 46
+// changed dark pixels, i.e. no pupil). Painted on the sphere, there is nothing
+// to protrude, float, clip or z-fight.
+export function ballEyeTexture(color) {
+  const { c, g } = surface(128, 128, '#171310');        // rim/dark side of the ball
+  const iris = g.createRadialGradient(32, 64, 3, 32, 64, 46);
+  iris.addColorStop(0, '#FFF0B0'); iris.addColorStop(0.18, color);
+  iris.addColorStop(0.66, color); iris.addColorStop(1, '#241A12');
+  g.fillStyle = iris; g.fillRect(0, 0, 128, 128);
+  // vertical slit pupil, tapered at both ends. 11 of 128 texels wide: at the eye
+  // scale used here that is ~20 screen px at one metre, so it survives the duel
+  // camera's distance instead of washing out into the iris.
+  g.fillStyle = '#07080B';
+  g.beginPath(); g.moveTo(32, 30);
+  g.bezierCurveTo(21, 49, 21, 80, 32, 98);
+  g.bezierCurveTo(43, 80, 43, 49, 32, 30); g.fill();
+  // one catchlight, upper-inner quadrant
+  g.fillStyle = '#FFFCED';
+  g.beginPath(); g.ellipse(25, 49, 4.5, 6.2, -0.4, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(255,255,240,0.45)';
+  g.beginPath(); g.arc(38, 82, 2.6, 0, Math.PI * 2); g.fill();
   return { map: canvasTexture(c) };
 }
+
