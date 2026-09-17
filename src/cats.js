@@ -25,7 +25,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { CAT_A, CAT_B, MATERIALS, DIM } from './palette.js';
 import { furTexture, clothTexture, metalTexture, leatherTexture, pleatTexture } from './tex.js';
-import { robeTexture, knightClothTexture, ballEyeTexture } from './costume-textures.js';
+import { robeTexture, knightClothTexture } from './costume-textures.js';
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -145,8 +145,14 @@ function buildRig(c) {
     fur: std(c.furBase, 'fur', { bumpScale: 0.04 }, furPair),
     belly: std(c.furBelly, 'fur', { bumpScale: 0.03 }, bellyPair),
     inner: std(c.earInner, 'fur', {}, furPair),
-    eye: std('#FFFFFF', 'steel', { roughness: 0.62, metalness: 0.0, emissive: c.eye, emissiveIntensity: c.eyeGlow * 0.22 },
-      tex(`eyeball-${c.eye}`, () => ballEyeTexture(c.eye))),
+    // v21b (user: "Make eyes black balls"): no iris, no slit, no catchlight, no
+    // map - one solid black glossy ball per eye. Glossy (roughness .30) so the
+    // key light still leaves a highlight and the sphere reads as a BALL rather
+    // than a hole punched in the skull; the faint self-emission keeps the
+    // silhouette legible when the head turns into its own shadow.
+    // ballEyeTexture() (costume-textures.js) is the v21 slit-on-ball map and is
+    // kept unused so the slit version is a one-line restore if he wants it back.
+    eye: std('#0A0A0D', 'steel', { roughness: 0.42, metalness: 0.0, emissive: '#101015', emissiveIntensity: 0.5 }),
     cheek: std(c.furBelly, 'fur', { roughness: 0.94 }),
     nose: std(c.nose, 'fur'),
     whisker: std('#FFFFFF', 'fur', { roughness: 0.45 }),
@@ -219,6 +225,10 @@ function buildRig(c) {
     //    reads as googly side-mounted orbs. The eye is now 0.42 rad out (a
     //    forward gaze with a slight outward angle) and 0.027 proud of the skull
     //    (was 0.037), so it reads as an eye set in the face rather than stuck on.
+    // v21b EYES: one plain BLACK ball per eye (user: "Make eyes black balls").
+    // The eye group keeps the outward yaw so both balls sit on the face and the
+    // camera-side one reads at profile; there is no map, no pupil mesh, no lid and
+    // no brow, so there is nothing in the eye that can clip, smear or float.
     const eye = new THREE.Group();
     eye.position.set(0.135,0.060,sz*0.122);
     eye.rotation.y = sz > 0 ? 0.42 : Math.PI-0.42;

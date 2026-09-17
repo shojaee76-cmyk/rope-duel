@@ -116,16 +116,14 @@ export function knightClothTexture(part = 'cape') {
   return finish(c, 0.18);
 }
 
-// v21: the eye is a plain BALL again (user: "make them simple ball and back to
-// the original eye"). The pupil is painted onto the ball instead of being a
-// second mesh stuck on the front: a sphere's UV puts the +Z pole (the direction
-// the eye looks) at u = 0.25, v = 0.5, so the slit sits exactly on the face of
-// the ball and follows its curvature. The v19b "original" pupil was a box whose
-// x .158 sat INSIDE the .165 ball surface - it never rendered at all, which is
-// why those eyes read as plain gold orbs; and a pupil built as a separate
-// ellipsoid pressed against the ball only shows a thin crescent (measured: 46
-// changed dark pixels, i.e. no pupil). Painted on the sphere, there is nothing
-// to protrude, float, clip or z-fight.
+// v21: the slit-on-ball eye map. NOT USED right now: the user asked for plain
+// black ball eyes ("Make eyes black balls") and cats.js gives the ball a flat
+// dark material instead. Kept because it is the verified slit version - restoring
+// it is one line in buildRig's M.eye (and it needs the ballEyeTexture import back).
+// How it works: a sphere's UV puts the +Z pole (the direction the eye looks) at
+// u = 0.25, v = 0.5, so the slit sits exactly on the face of the ball and follows
+// its curvature - nothing protrudes or z-fights the way the v19b pupil box did
+// (that box sat INSIDE the ball surface and never rendered at all).
 export function ballEyeTexture(color) {
   const { c, g } = surface(128, 128, '#171310');        // rim/dark side of the ball
   const iris = g.createRadialGradient(32, 64, 3, 32, 64, 46);

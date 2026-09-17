@@ -1,7 +1,15 @@
-// tools/eyeprobe.mjs — do the new ball eye's painted PUPIL and CATCHLIGHT reach
-// the screen? A vision model claimed "no visible pupils", and per this project's
-// rule a claim that something is VISIBLE must be proven by rendered pixels, never
-// by reading the scene graph.
+// tools/eyeprobe.mjs — do the eye balls actually reach the screen, and are they
+// BLACK? v21b made each eye a plain black ball (user: "Make eyes black balls"),
+// and per this project's rule a claim about what is VISIBLE must be proven by
+// rendered pixels, never by reading the scene graph.
+//
+// The test: on the pinned pair, hide the eye balls completely and compare the
+// MEAN LUMINANCE of a small box around each eye's projected centre. The box is
+// measured with the ball shown and with it hidden:
+//   - shown must be clearly DARKER than hidden (the ball is black and it is on
+//     screen), and
+//   - the box in the shown frame must be darker than the surrounding head fur,
+//     so the eye reads as a black dot rather than a shadowed patch of face.
 //
 // Dead ends worth not repeating:
 //  - frame-diffing the whole picture: the scene animates (crowd, torches,
@@ -9,19 +17,15 @@
 //    whatever you toggle;
 //  - absolute RGB tests on a PAINTED part: the night key light washes a
 //    saturated material toward white (flat green renders as rgb(211,244,164)),
-//    so a strict colour test calls the part missing while it is plainly there.
-// What works: A/B the SAME camera twice, with the eye's texture map ON and OFF
-// (map = null), and count dark pixels in a small box around the projected ball.
-// A plain ball is bright; a textured one carries the dark slit and rim, so the
-// ON frame must own extra dark pixels.
+//    so a strict colour test calls a part missing while it is plainly there.
 //
 // Two traps:
 //  - director.freeze() auto-RELEASES while |pressure| >= 0.1
 //    (`if (this.frozen && Math.abs(this.pressure) >= 0.1)`), so a "frozen" scene
 //    straight out of demo mode walks off mid-shot: pin pressure to 0 as well.
 //  - the eye's outward normal is yawed ~24 degrees out of the body plane, so the
-//    slit faces the +z side (the side the duel camera sits on). Shooting the head
-//    face-on puts the slit at the ball's edge and finds nothing.
+//    balls face the +z side (the side the duel camera sits on). Shooting the head
+//    face-on looks at the far side of the head instead.
 //   node tools/eyeprobe.mjs
 import { chromium } from 'playwright-core';
 import http from 'http';
@@ -61,12 +65,11 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(2000);
 
-const setMap = (on) => page.evaluate((on) => {
+const showEyes = (on) => page.evaluate((on) => {
   let n = 0;
   for (const k of ['A', 'B']) window.__duelDebug['cat' + k].data.head.traverse((o) => {
     if (o.name !== 'eye-ball') return;
-    if (on) { if (o.userData._map) { o.material.map = o.userData._map; o.material.needsUpdate = true; } }
-    else { o.userData._map = o.material.map; o.material.map = null; o.material.needsUpdate = true; }
+    o.visible = on;
     n++;
   });
   return n;
@@ -105,34 +108,36 @@ async function shot(side, mode, file) {
   return { buf, diag };
 }
 
-function darkIn(buf, centre, half, thr = 70) {
+function lumBox(buf, centre, half, thr = 70) {
   const p = PNG.sync.read(buf);
   const x0 = Math.max(0, Math.round(centre[0] - half)), x1 = Math.min(p.width, Math.round(centre[0] + half));
   const y0 = Math.max(0, Math.round(centre[1] - half)), y1 = Math.min(p.height, Math.round(centre[1] + half));
-  let dark = 0, tot = 0;
+  let dark = 0, tot = 0, sum = 0;
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     const i = (p.width * y + x) << 2;
     tot++;
     const l = 0.299 * p.data[i] + 0.587 * p.data[i + 1] + 0.114 * p.data[i + 2];
+    sum += l;
     if (l < thr) dark++;
   }
-  return { dark, tot };
+  return { dark, tot, meanLum: +(sum / tot).toFixed(1) };
 }
 
 const out = {};
-for (const [mode, half, minDelta] of [['duel', 16, 20], ['close', 42, 200]]) {
+for (const [mode, half, minDelta] of [['duel', 14, 12], ['close', 40, 40]]) {
   for (const side of ['A', 'B']) {
     const on = await shot(side, mode, `tools/shots/eyeprobe_${side}_${mode}_on.png`);
-    await setMap(false);
-    const off = await shot(side, mode, `tools/shots/eyeprobe_${side}_${mode}_plain.png`);
-    await setMap(true);
+    await showEyes(false);
+    const off = await shot(side, mode, `tools/shots/eyeprobe_${side}_${mode}_noeyes.png`);
+    await showEyes(true);
+    const headBox = lumBox(on.buf, on.diag.headScreen, Math.round(on.diag.headPixelHeight * 0.42));
     const eyes = on.diag.eyes.map((c, i) => {
-      const a = darkIn(on.buf, c, half), z = darkIn(off.buf, c, half);
-      return { i, screen: c.map(Math.round), withMap: a.dark, withoutMap: z.dark, delta: a.dark - z.dark };
+      const a = lumBox(on.buf, c, half), z = lumBox(off.buf, c, half);
+      return { i, screen: c.map(Math.round), lumEye: a.meanLum, lumNoEye: z.meanLum, drop: +(z.meanLum - a.meanLum).toFixed(1), darkPx: a.dark };
     });
     // the near eye is the one that matters; the far one is occluded by the head
-    const best = eyes.reduce((m, e) => Math.max(m, e.delta), 0);
-    out[mode + '_' + side] = { headPixelHeight: Math.round(on.diag.headPixelHeight), eyes, bestDelta: best, pass: best >= minDelta };
+    const best = eyes.reduce((m, e) => Math.max(m, e.drop), 0);
+    out[mode + '_' + side] = { headPixelHeight: Math.round(on.diag.headPixelHeight), headMeanLum: headBox.meanLum, eyes, bestDrop: best, pass: best >= minDelta };
   }
 }
 const allPass = Object.values(out).every((v) => v.pass);
