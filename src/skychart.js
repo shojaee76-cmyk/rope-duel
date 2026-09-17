@@ -144,10 +144,14 @@ export function createSkyChart(scene, camera, opts = {}) {
     // fit: on narrow viewports the visible wall slice is narrower than the
     // board, so the plane shrinks to 88% of the visible slice (the walnut board
     // behind it is world-fixed and bleeds off-frame, as real walls do).
-    // v19: 0.88 of the BOARD too (was 0.92), so the walnut frame shows as a real
-    // margin around the bezel instead of the screen covering the whole board.
+    // v19: 0.92 of the BOARD -> 0.88, so the walnut frame shows as a real margin
+    // around the bezel instead of the screen covering the whole board.
+    // v21: the board factor goes back UP to 0.94 (user: "a little bigger chart"):
+    // +7% wider and taller, still inside the board with a 0.24 m walnut margin on
+    // every side. The VISIBLE-SLICE factor stays at 0.88 - that one is the phone
+    // margin, and raising it would push the chart off the edge of a narrow frame.
     const b = opts.board;
-    const w = Math.min(WALL.w, b ? b.w * 0.88 : WALL.w, halfW * 2 * 0.88);
+    const w = Math.min(WALL.w, b ? b.w * 0.94 : WALL.w, halfW * 2 * 0.88);
     const h = WALL.h * (w / WALL.w);
     mesh.geometry.dispose();
     mesh.geometry = new THREE.PlaneGeometry(w, h);
@@ -160,10 +164,12 @@ export function createSkyChart(scene, camera, opts = {}) {
     // canvas resolution ~1:1 with the projected board, clamped so a phone is
     // not blurry and a 4K window is not a megabyte per texture upload.
     // v19: 1.35 -> 1.9 (a supersampled canvas: the review called the header and
-    // the axis digits pixelated, which is what a 1.35x downsample does to text)
+    // the axis digits pixelated, which is what a 1.35x downsample does to text).
+    // v21: cap 1440 -> 1560 so the bigger chart (0.94 of the board) keeps its 1.9x
+    // supersample at 1080p instead of hitting the clamp and softening.
     const onScreenW = (w / (halfW * 2)) * vw;
     const onScreenH = (h / (halfH * 2)) * vh;
-    const cw = Math.round(Math.min(1440, Math.max(640, onScreenW * 1.9)));
+    const cw = Math.round(Math.min(1560, Math.max(640, onScreenW * 1.9)));
     const chh = Math.max(160, Math.round(cw * (onScreenH / onScreenW)));
     if (cw !== canvas.width || chh !== canvas.height) {
       canvas.width = cw; canvas.height = chh;

@@ -225,15 +225,17 @@ function buildRig(c) {
     //    reads as googly side-mounted orbs. The eye is now 0.42 rad out (a
     //    forward gaze with a slight outward angle) and 0.027 proud of the skull
     //    (was 0.037), so it reads as an eye set in the face rather than stuck on.
-    // v21b EYES: one plain BLACK ball per eye (user: "Make eyes black balls").
-    // The eye group keeps the outward yaw so both balls sit on the face and the
-    // camera-side one reads at profile; there is no map, no pupil mesh, no lid and
-    // no brow, so there is nothing in the eye that can clip, smear or float.
+    // v21b EYES: one plain BLACK ball per eye (user: "Make eyes black balls"),
+    // then a size pass down (user: "a little smaller eyes"): radius .047 -> .041,
+    // pushed 0.003 further out so the smaller ball still sits ON the skull instead
+    // of sinking into it. The eye group keeps the outward yaw so both balls sit on
+    // the face and the camera-side one reads at profile; there is no map, no pupil
+    // mesh, no lid and no brow, so nothing in the eye can clip, smear or float.
     const eye = new THREE.Group();
     eye.position.set(0.135,0.060,sz*0.122);
     eye.rotation.y = sz > 0 ? 0.42 : Math.PI-0.42;
     eye.rotation.z = sz*(don ? 0.10 : -0.09);
-    const ball = mesh(sphere(0.047, 20, 14), M.eye, 0, 0, -0.008);
+    const ball = mesh(sphere(0.041, 20, 14), M.eye, 0, 0, -0.005);
     ball.name = 'eye-ball';
     eye.add(ball); head.add(eye);
   }

@@ -667,13 +667,15 @@ export function buildArena(scene) {
   };
   // brass stand-offs: four short pins spanning the gap (board face -> screen back)
   const brassMat = new THREE.MeshStandardMaterial({ color: '#C8A24A', metalness: 0.9, roughness: 0.32 });
+  // v21: the stand-offs track the chart's footprint (0.94 of the board, up from
+  // 0.88 with the bigger chart), so they stay 0.22 inside the screen's corners.
   for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const pin = mesh(new THREE.CylinderGeometry(0.030, 0.038, SCREEN_GAP + 0.05, 8), brassMat,
-      sx * (BOARD_W * 0.88 / 2 - 0.22), boardY + sy * (BOARD_H * 0.88 / 2 - 0.22), boardZ + 0.09 + SCREEN_GAP / 2);
+      sx * (BOARD_W * 0.94 / 2 - 0.22), boardY + sy * (BOARD_H * 0.94 / 2 - 0.22), boardZ + 0.09 + SCREEN_GAP / 2);
     pin.rotation.x = Math.PI / 2;
     arena.add(pin);
     const collar = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 10), brassMat,
-      sx * (BOARD_W * 0.88 / 2 - 0.22), boardY + sy * (BOARD_H * 0.88 / 2 - 0.22), boardZ + 0.09 + 0.012);
+      sx * (BOARD_W * 0.94 / 2 - 0.22), boardY + sy * (BOARD_H * 0.94 / 2 - 0.22), boardZ + 0.09 + 0.012);
     collar.rotation.x = Math.PI / 2;
     arena.add(collar);
   }
