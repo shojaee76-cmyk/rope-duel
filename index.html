@@ -377,6 +377,19 @@
     #meter-buy, #meter-sell, .plate-momentum i { transition-duration: 0.01s; }
     #lane .lane-mark, #lane .lane-cat { transition-duration: 0.01s; }
   }
+  /* ---------- v22 mobile pass: kill the backdrop blur over the live canvas ----
+     Every blurred plate forces the browser to re-blur the animating WebGL frame
+     underneath it, every frame, for every plate - seven of them across the page.
+     On phones that is the single biggest jank source in this page (the fight is
+     fine on a desktop GPU and stutters on a phone). Coarse-pointer and small
+     screens keep the same plates and read the same, with slightly stronger
+     translucent fills in place of the blur. Desktop keeps the glass. */
+  @media (pointer: coarse), (max-width: 720px) {
+    #brand .eyebrow, #status, #hud, #meter, .plate, .callout, #lane {
+      backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+    #hud, #meter, #lane, .plate { background: rgba(9, 11, 24, 0.86); }
+    #brand .eyebrow, #status { background: rgba(8, 9, 20, 0.8); }
+  }
 </style>
 </head>
 <body>

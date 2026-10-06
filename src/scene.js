@@ -24,8 +24,13 @@ import { setMaxAnisotropy } from './tex.js';
 
 export function createDuelScene(container, opts = {}) {
   // renderer / scene / camera (spec 1.1)
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  // v22: MSAA runs only on the desktop path. Coarse-pointer GPUs pay real cost
+  // for the multisample resolve every frame, and at the mobile render ratio a
+  // dense phone screen hides the aliasing anyway (the page was reported laggy
+  // on a phone; turning MSAA off is the first honest cut, the HUD blur below
+  // is the second).
   const desktopQuality = (opts.vfxScale || 1) > 0.5;
+  const renderer = new THREE.WebGLRenderer({ antialias: desktopQuality, powerPreference: 'high-performance' });
   /* Base render ratio. It used to be min(dpr, 2), i.e. 4x the pixels of a 1x
    * display: measured on this laptop's iGPU the WebGL pass costs 7 ms at 1x and
    * 23 ms at 2x, so a 2x cap spends the whole frame budget before the scene has
@@ -43,7 +48,7 @@ export function createDuelScene(container, opts = {}) {
   renderer.shadowMap.enabled = false;   // v4: cost 40% of the frame budget
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.35;
-  setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
+  setMaxAnisotropy(Math.min(desktopQuality ? 8 : 4, renderer.capabilities.getMaxAnisotropy()));
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();

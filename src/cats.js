@@ -203,6 +203,7 @@ function buildRig(c) {
   for (let i=0; i<np.count; i++) np.setZ(i,np.getZ(i)*(0.65+0.35*(np.getY(i)/0.025+1)/2));
   nose.geometry.computeVertexNormals(); head.add(nose);
   const don = c.furKey === 'A-fur';
+  const eyes = [];   // v22: blink refs (the black ball inside each eye group)
   const mouthGeos = [stroke([[0.282,-0.033,0],[0.280,-0.052,0],[0.277,-0.062,0]],0.0027,6)];
   for (const sz of [-1,1]) {
     mouthGeos.push(stroke([[0.277,-0.060,0],[0.273,-0.075,sz*0.024],
@@ -237,7 +238,7 @@ function buildRig(c) {
     eye.rotation.z = sz*(don ? 0.10 : -0.09);
     const ball = mesh(sphere(0.041, 20, 14), M.eye, 0, 0, -0.005);
     ball.name = 'eye-ball';
-    eye.add(ball); head.add(eye);
+    eye.add(ball); head.add(eye); eyes.push(ball);
   }
   head.add(mesh(joined(mouthGeos),M.mouth));
   const whiskerGeos = [];
@@ -321,7 +322,7 @@ function buildRig(c) {
   }
   tail[5].add(mesh(sphere(0.030, 8, 6), M.fur, 0, -0.15, 0));   // rounded tip
 
-  return { root, hips, spine, head, ears, arms, legs, tail, M, furPair };
+  return { root, hips, spine, head, ears, arms, legs, tail, eyes, M, furPair };
 }
 
 // ---------- swords ----------
@@ -755,6 +756,23 @@ const IDLE_TEMPLATE = IDLE_POSE();
 
 const NUM_KEYS = Object.keys(IDLE_TEMPLATE);
 
+// v22 per-channel pose tracking rates (1/s), the follow-through port: one global
+// rate moved hips, blade and tail in lockstep and read as a rigid puppet; in the
+// 3D rebuild each part settles at its own speed and the motion reads organic.
+// Arms and the root-motion channels keep v21's 26 - they own the blade path the
+// readability gates measure - while the torso carries the follow-through of the
+// arm, the head reads a beat late, and the cape and tail trail the whole body.
+// Still exponential in dt, so frame-rate independent at any refresh.
+const TRACK_RATE = {
+  shS_z: 26, shS_x: 26, elS: 26, shO_z: 26, shO_x: 26, elO: 26,
+  xOff: 26, yOff: 26, zOff: 26, crouch: 26, twist: 26, tilt: 26, lean: 26,
+  lock: 26, tremble: 26,
+  thL: 22, knL: 22, thR: 22, knR: 22, footL: 22, footR: 22,
+  spineLean: 19, spineTwist: 19,
+  headPitch: 15, headYaw: 15, headRoll: 15,
+  capeRaise: 12, tailCurl: 9, tailAmp: 9
+};
+
 // v14: per-move RECOVER lengths (the comic windmill every move ends with).
 // One flat 0.16 s made every move stop the same way; a wrist feint and a full
 // charging lunge visibly do not cost the same effort.
@@ -780,6 +798,11 @@ export class DuelCat {
     this.x = 0;
     this.windmill = 0;
     this.earSwivel = 0;
+    // v22 blink state: first blink after 4.5 s (per-cat phase), then every
+    // ~3.2-4.6 s; the schedule is deterministic so early probe captures at
+    // fixed times always see open eyes.
+    this.eyeBlink = 0;
+    this.eyeBlinkT = 4.5 + (d.side === 'A' ? 0 : 1.7);
     this.frozenPose = null;
     // world-x direction this cat advances in (A sits at +x and faces -x)
     this.fw = d.side === 'A' ? -1 : 1;
@@ -840,10 +863,10 @@ export class DuelCat {
     // instead of snapping to each new target (the readability pass needs the
     // arm to travel THROUGH space, not teleport between keyframes).
     const p = this.pose, tg = this.target;
-    // v21: 26 instead of 20 - the moves are 1.35x shorter again, so the limbs have
-    // to track faster or the pose lags behind the state and smears the swing.
-    const k = 1 - Math.exp(-26 * dt);
-    for (const key of NUM_KEYS) p[key] = lerp(p[key], tg[key], k);
+    // v22: per-channel tracking (see TRACK_RATE). Arms + root motion stay at 26
+    // exactly as v21 tuned them; every other channel settles slower so the pose
+    // carries weight instead of moving as one rigid piece.
+    for (const key of NUM_KEYS) p[key] = lerp(p[key], tg[key], 1 - Math.exp(-(TRACK_RATE[key] || 22) * dt));
 
     this._applyPose(dt, ctx);
   }
@@ -894,15 +917,20 @@ export class DuelCat {
     // tail: v19 - held BEHIND and UP (see TAIL_RAKE in buildRig), arcing up with
     // a per-segment curl, whipping sideways with the fight. tailCurl is now a
     // shared 0..1.6 "how raised" factor: 1 = alert, 1.5 = the wrapped guard.
-    const sway = Math.sin(this.time * 2.2) * p.tailAmp;
+    const sway = p.tailAmp;
     const curl = p.tailCurl;
+    // v22: the lateral sway is a TRAVELLING wave down the chain (phase lags with
+    // f), so the tail whips tip-last like a live one instead of swinging as a
+    // rigid rod; per-cat phase keeps the two tails from moving in sync.
+    const tPh = d.side === 'A' ? 0 : 1.15;
     d.tail.forEach((seg, i) => {
       const f = i / (d.tail.length - 1);
       // upward arc: the bend deepens toward the tip, so the tail sweeps up in a
       // curve instead of leaving the rump as a rigid stick
       seg.rotation.z = -(0.055 + f * 0.05) * curl;
       // lateral whip (rotation.x leaves the tail's own plane): a live tail
-      seg.rotation.x = sway * (0.4 + f) + Math.sin(this.time * 1.6 + i) * 0.03 - p.lean * 0.25;
+      seg.rotation.x = Math.sin(this.time * 2.2 + tPh - f * 1.30) * sway * (0.45 + f * 0.95)
+        + Math.sin(this.time * 1.6 + i) * 0.03 - p.lean * 0.25;
     });
 
     // ears: micro twitch + flag dart
@@ -911,6 +939,18 @@ export class DuelCat {
       const s = i === 0 ? 1 : -1;
       ear.rotation.y = s * (0.15 * Math.sin(this.time * 0.7 + i * 2) + this.earSwivel * 0.5 * (d.side === 'B' ? 1 : -1));
     });
+
+    // v22 blink: a real blink every few seconds keeps the face alive. The eye
+    // ball squashes on Y and springs back (~120 ms), nothing else in the eye
+    // stack to disturb (single ball per eye by v21 design).
+    this.eyeBlinkT -= dt;
+    if (this.eyeBlinkT <= 0) {
+      this.eyeBlink = 1;
+      this.eyeBlinkT = 3.2 + 1.4 * Math.abs(Math.sin(this.time * 0.53));
+    }
+    if (this.eyeBlink > 0) this.eyeBlink = Math.max(0, this.eyeBlink - dt / 0.12);
+    const bl = this.eyeBlink <= 0 ? 0 : Math.sin(this.eyeBlink * Math.PI);
+    if (d.eyes) for (const eb of d.eyes) eb.scale.y = 1 - 0.82 * bl;
 
     // costume dynamics
     if (d.cape) this._cape();
