@@ -6,13 +6,24 @@ import { ARENA } from './palette.js';
 const W = 512, H = 320;
 
 export class PriceFlag {
-  constructor() {
+  constructor(opts = {}) {
     this.canvas = document.createElement('canvas');
     this.canvas.width = W; this.canvas.height = H;
     this.g = this.canvas.getContext('2d');
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 4;
+    /* v23 perf (the phone-lag pass): the canvas is re-painted on every price
+     * emit (4 Hz live) and every repaint re-uploads the texture. Two cuts:
+     *  - generateMipmaps off + LinearFilter: no full mip-chain regen on upload
+     *    (bold banner text read near 0.5x never needed the chain);
+     *  - minDrawMs gate: repaints coalesce to the budget (250 ms desktop,
+     *    800 ms mobile) with a trailing repaint, so the final price always lands. */
+    this.texture.generateMipmaps = false;
+    this.texture.minFilter = THREE.LinearFilter;
+    this.minDrawMs = opts.minDrawMs ?? 250;
+    this._lastDrawAt = 0;
+    this._trail = null;
 
     this.mat = new THREE.MeshBasicMaterial({
       map: this.texture, side: THREE.DoubleSide, transparent: true
@@ -68,7 +79,16 @@ export class PriceFlag {
     const fill = this._lastDir === -1 ? ARENA.flagDown : ARENA.flagUp;
     const key = `${this.price.toFixed(1)}|${fill}|${this.chg24hText || this.chg24h.toFixed(2)}`;
     if (key === this.lastDrawnKey) return;
+    // v23: throttle repaints; a trailing timeout repaints the settled value.
+    const now = performance.now();
+    if (now - this._lastDrawAt < this.minDrawMs) {
+      if (!this._trail) {
+        this._trail = setTimeout(() => { this._trail = null; this._draw(); }, this.minDrawMs + 5);
+      }
+      return;
+    }
     this.lastDrawnKey = key;
+    this._lastDrawAt = now;
 
     g.clearRect(0, 0, W, H);
     // banner shape with swallow-tail ends

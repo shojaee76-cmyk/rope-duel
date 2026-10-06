@@ -16,11 +16,11 @@ import { canvasTexture, stoneTexture, stoneCanvas, bumpFrom, clothTexture } from
 const std = (color, kind = 'cloth', extra = {}) =>
   new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
 const texed = (color, kind, pair, extra = {}) => {
+  // v23: colour maps stay, BUMP maps removed everywhere - bump sampling is a
+  // per-fragment texture fetch plus derivatives on the largest surfaces in the
+  // scene (walls, floor, board) and its relief is near-invisible at this scale.
   const m = new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
-  if (pair) {
-    m.map = pair.map;
-    if (pair.bump) { m.bumpMap = pair.bump; m.bumpScale = extra.bumpScale ?? 0.06; }
-  }
+  if (pair && pair.map) m.map = pair.map;
   return m;
 };
 const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
@@ -512,10 +512,9 @@ export function buildArena(scene) {
   const dadoSeg = (cx, w, tex, bump) => {
     const t = tex.clone(); t.needsUpdate = true;
     t.repeat.set(w / 2.6, 1);                 // 2.6 world units per tile sheet (was 26/10)
-    const b = bump.clone(); b.needsUpdate = true; b.repeat.copy(t.repeat);
     return mesh(
       new THREE.BoxGeometry(w, dadoH, 0.54),
-      new THREE.MeshStandardMaterial({ map: t, bumpMap: b, bumpScale: 0.05, roughness: 0.5 }),
+      new THREE.MeshStandardMaterial({ map: t, roughness: 0.5 }),
       cx, dadoH / 2, wallZ + 0.01
     );
   };
@@ -562,8 +561,8 @@ export function buildArena(scene) {
   walnutPair.map.wrapS = walnutPair.map.wrapT = THREE.RepeatWrapping;
   walnutPair.map.repeat.set(3, 1.2);
   const boardMat = new THREE.MeshStandardMaterial({
-    color: '#5B3A21', map: walnutPair.map, bumpMap: walnutPair.bump,
-    bumpScale: 0.04, roughness: 0.62, metalness: 0.05
+    color: '#5B3A21', map: walnutPair.map,
+    roughness: 0.62, metalness: 0.05
   });
   const boardY = dadoH + friezeH + BOARD_H / 2 + 0.06;   // 3.11
   const board = mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, 0.18), boardMat, 0, boardY, boardZ);
@@ -604,7 +603,7 @@ export function buildArena(scene) {
     }
     geo.computeVertexNormals();
     const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      map: tex, bumpMap: bumpFrom(tex.image, 0.9), bumpScale: 0.07, roughness: 0.92, side: THREE.DoubleSide
+      map: tex, roughness: 0.92, side: THREE.DoubleSide
     }));
     m.position.set(x, 2.52, rugZ);
     m.userData.rug = { w: 1.58, h: 1.62, world: { x, y: 2.52, z: rugZ } };   // for tools/rugcheck.mjs
@@ -669,13 +668,14 @@ export function buildArena(scene) {
   const brassMat = new THREE.MeshStandardMaterial({ color: '#C8A24A', metalness: 0.9, roughness: 0.32 });
   // v21: the stand-offs track the chart's footprint (0.94 of the board, up from
   // 0.88 with the bigger chart), so they stay 0.22 inside the screen's corners.
+  // v23: footprint follows the chart to 0.985 of the board.
   for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const pin = mesh(new THREE.CylinderGeometry(0.030, 0.038, SCREEN_GAP + 0.05, 8), brassMat,
-      sx * (BOARD_W * 0.94 / 2 - 0.22), boardY + sy * (BOARD_H * 0.94 / 2 - 0.22), boardZ + 0.09 + SCREEN_GAP / 2);
+      sx * (BOARD_W * 0.985 / 2 - 0.22), boardY + sy * (BOARD_H * 0.985 / 2 - 0.22), boardZ + 0.09 + SCREEN_GAP / 2);
     pin.rotation.x = Math.PI / 2;
     arena.add(pin);
     const collar = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 10), brassMat,
-      sx * (BOARD_W * 0.94 / 2 - 0.22), boardY + sy * (BOARD_H * 0.94 / 2 - 0.22), boardZ + 0.09 + 0.012);
+      sx * (BOARD_W * 0.985 / 2 - 0.22), boardY + sy * (BOARD_H * 0.985 / 2 - 0.22), boardZ + 0.09 + 0.012);
     collar.rotation.x = Math.PI / 2;
     arena.add(collar);
   }
@@ -715,11 +715,9 @@ export function buildArena(scene) {
   // ---- floor: paved courtyard, medallion laid as a single decal ----
   const floorTex = floorTexture();
   floorTex.repeat.set(3, 2);
-  const floorBump = bumpFrom(floorTex.image, 0.8);
-  floorBump.repeat.copy(floorTex.repeat);
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(26, 15),
-    new THREE.MeshStandardMaterial({ map: floorTex, bumpMap: floorBump, bumpScale: 0.06, roughness: 0.9 })
+    new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, 0.5);

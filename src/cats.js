@@ -65,12 +65,13 @@ function tex(key, make) {
 
 // ---------- tiny mesh helpers ----------
 function std(color, kind = 'fur', extra = {}, pair = null) {
-  const m = new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
-  if (pair) {
-    m.map = pair.map;
-    if (pair.bump) { m.bumpMap = pair.bump; m.bumpScale = extra.bumpScale ?? 0.06; }
-  }
-  return m;
+  /* v23 (user: "dont let design use texture ... make them without texture"):
+   * every cat material is a FLAT COLOUR now - no map, no bumpMap, no texture
+   * fetch per fragment beyond the base colour. The pair argument stays in the
+   * signature so all call sites keep working, but it is deliberately not
+   * attached. The fur/cloth/metal reads come from colour + roughness +
+   * metalness + the scene lights only. */
+  return new THREE.MeshStandardMaterial({ color, ...MATERIALS[kind], ...extra });
 }
 function mesh(geo, mat, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(geo, mat);

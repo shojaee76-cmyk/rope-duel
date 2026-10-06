@@ -146,12 +146,13 @@ export function createSkyChart(scene, camera, opts = {}) {
     // behind it is world-fixed and bleeds off-frame, as real walls do).
     // v19: 0.92 of the BOARD -> 0.88, so the walnut frame shows as a real margin
     // around the bezel instead of the screen covering the whole board.
-    // v21: the board factor goes back UP to 0.94 (user: "a little bigger chart"):
-    // +7% wider and taller, still inside the board with a 0.24 m walnut margin on
-    // every side. The VISIBLE-SLICE factor stays at 0.88 - that one is the phone
-    // margin, and raising it would push the chart off the edge of a narrow frame.
+    // v21: board factor 0.94. v23 (user: "make the wall behind them (the chart)
+    // bigger"): 0.985 - the screen now all but fills the board face (the walnut
+    // trim still reads as the border) - and the VISIBLE-SLICE factor goes
+    // 0.88 -> 0.935 so narrow/phone viewports get the same growth while the
+    // chart stays fully inside the frame.
     const b = opts.board;
-    const w = Math.min(WALL.w, b ? b.w * 0.94 : WALL.w, halfW * 2 * 0.88);
+    const w = Math.min(WALL.w, b ? b.w * 0.985 : WALL.w, halfW * 2 * 0.935);
     const h = WALL.h * (w / WALL.w);
     mesh.geometry.dispose();
     mesh.geometry = new THREE.PlaneGeometry(w, h);
@@ -185,6 +186,7 @@ export function createSkyChart(scene, camera, opts = {}) {
   let stOverride = null;
   let dots = [];
   let lastRev = -1, lastPrice = null, lastDraw = 0, draws = 0;
+  let lastCanvasW = 0;   // v23: canvas-attribute snapshot for resize detection
   let lastFreshAt = Date.now();
   const STALE_MS = 8000, DOT_TTL = 9000;
 
@@ -508,11 +510,11 @@ export function createSkyChart(scene, camera, opts = {}) {
   /* ---------- public API ---------- */
   function update(nextSnap, nextMeta) {
     if (!nextSnap) return;
-    // an embedded pane (desktop app preview) can change size without a window
-    // resize event: re-lay out when the viewport it was built for has moved on
-    const vw = (renderer && renderer.domElement.clientWidth) || window.innerWidth || 1280;
-    const vh = (renderer && renderer.domElement.clientHeight) || window.innerHeight || 800;
-    if (vw + 'x' + vh !== laidOutFor) { layout(); draw(); }
+    // v23 perf: this used to read renderer.domElement.clientWidth/Height on
+    // every call (forcing a style/layout flush). The canvas ATTRIBUTE width
+    // changes exactly when the renderer resized and costs nothing to read.
+    const cwAttr = renderer ? renderer.domElement.width : 0;
+    if (cwAttr !== lastCanvasW) { lastCanvasW = cwAttr; layout(); draw(); }
     snap = nextSnap;
     if (nextMeta) meta = nextMeta;
     if (snap.rev !== lastRev) { lastRev = snap.rev; lastFreshAt = Date.now(); }

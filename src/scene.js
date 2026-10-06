@@ -85,7 +85,12 @@ export function createDuelScene(container, opts = {}) {
   const rope = new VerletRope();
   scene.add(rope.mesh);
 
-  const flag = new PriceFlag();
+  const flag = new PriceFlag({
+    // v23 perf: the flag canvas used to repaint (and re-upload its texture with a
+    // full mipmap regen) on EVERY 250 ms price emit. Mobile gets 800 ms - the
+    // flag still reads as live to the eye, at a third of the upload rate.
+    minDrawMs: desktopQuality ? 250 : 800
+  });
   scene.add(flag.group);
 
   const catA = new DuelCat('A');
@@ -126,6 +131,9 @@ export function createDuelScene(container, opts = {}) {
     renderer,
     anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
     board: arena.userData.tapeBoard,   // v18: mount the tape on the wall board
+    // v23 perf: mobile repaints the chart canvas (and re-uploads its texture)
+    // at 0.9 s instead of 0.4 s - halved upload cost, invisible at 1 s candles.
+    redrawMs: desktopQuality ? 400 : 900
   });
   function onMouse(e) {
     const w = container.clientWidth || innerWidth, h = container.clientHeight || innerHeight;
@@ -425,10 +433,15 @@ export function createDuelScene(container, opts = {}) {
 
   function resize() {
     const w = container.clientWidth || 1280, h = container.clientHeight || 720;
+    viewW = w;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
   }
+  // v23 perf: the moon slot used to read container.clientWidth EVERY FRAME, which
+  // flushes style/layout on every read (profiled at 10.3% of main-thread self
+  // time). The width only changes on resize, so it is cached here.
+  let viewW = container.clientWidth || innerWidth;
   function onResize() { resize(); }
   resize();
   window.addEventListener('resize', onResize);
@@ -912,7 +925,7 @@ export function createDuelScene(container, opts = {}) {
     if (moon) {
       const m = moon.material;
       m.color.setScalar(1 + amb.moonPulse * 0.34 + Math.sin(simTime * 0.8) * 0.04);
-      const vw = container.clientWidth || innerWidth;
+      const vw = viewW;
       const slot = vw < 700 ? MOON_SLOT.narrow : (vw < 1024 ? MOON_SLOT.mid : MOON_SLOT.wide);
       // screen fraction -> world point on the moon's own z plane. Same ray
       // march the sky chart uses (unproject -> normalize the direction ->

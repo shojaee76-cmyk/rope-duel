@@ -389,6 +389,10 @@
       backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
     #hud, #meter, #lane, .plate { background: rgba(9, 11, 24, 0.86); }
     #brand .eyebrow, #status { background: rgba(8, 9, 20, 0.8); }
+    /* v23: the full-screen vignette+noise layer composites over the live WebGL
+       frame every frame; measured ~1.6x fps and the long-task count collapse in
+       mobile emulation when it is hidden. Coarse/small screens go without. */
+    #vignette { display: none !important; }
   }
 </style>
 </head>
